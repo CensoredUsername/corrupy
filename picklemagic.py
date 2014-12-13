@@ -320,6 +320,9 @@ class FakeModule(types.ModuleType):
 
         return self.__name__ == othername
 
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     def __hash__(self):
         return hash(self.__name__)
 
