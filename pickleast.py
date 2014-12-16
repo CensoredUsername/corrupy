@@ -4,8 +4,8 @@ import pickle
 import cPickle
 
 class PickleBase(object):
-    def __call__(self, *args):
-        return Call(self, *args)
+    def __call__(self, *args, **kwargs):
+        return Call(self, *args, **kwargs)
 
     def __getattr__(self, name):
         return Call(getattr, self, name)
@@ -78,20 +78,36 @@ class PickleBase(object):
         return NotImplementedError()
 
 class Call(PickleBase):
-    def __init__(self, callable, *args):
+    def __init__(self, callable, *args, **kwargs):
         self.callable = callable
+        if args and kwargs:
+            raise ValueError("Call() cannot take both initialization arguments and attribute setting keyword arguments")
         self.args = args
+        self.kwargs = kwargs
     def serialize(self, pickler):
-        pickler.save(self.callable)
-        pickler.write(pickle.MARK)
-        for i in self.args:
-            pickler.save(i)
-        pickler.write(pickle.TUPLE+pickle.REDUCE)
+            if self.kwargs:
+                pickler.save(self.callable)
+                pickler.write(pickle.MARK)
+                pickler.save(None)
+                pickler.save(self.kwargs)
+                pickler.write(pickle.TUPLE+pickle.BUILD)
+            else:
+                pickler.save(self.callable)
+                pickler.write(pickle.MARK)
+                for i in self.args:
+                    pickler.save(i)
+                pickler.write(pickle.TUPLE+pickle.REDUCE)
+
     def __repr__(self):
-        if self.args:
-            return "Call({}, {})".format(repr(self.callable), ", ".join(repr(arg) for arg in self.args))
+        if self.kwargs:
+            return "Call({}, {})".format(repr(self.callable), 
+                                         ", ".join(key + "=" + repr(value) for key, value in self.kwargs.iteritems()))
         else:
-            return "Call({})".format(repr(self.callable))
+            if self.args:
+                return "Call({}, {})".format(repr(self.callable), 
+                                             ", ".join(repr(arg) for arg in self.args))
+            else:
+                return "Call({})".format(repr(self.callable))
 
 def DelAttr(self, obj, attr):
     return CallMethod(obj, "__delattr__", attr)
@@ -184,7 +200,7 @@ def dumps(obj):
     return file.getvalue()
 
 def optimize_dumps(origpickle):
-    optipickle = dumps(Import(cPickle.loads)(Wrap(origpickle.encode("zlib")).decode("zlib")))
+    optipickle = dumps(Import(pickle.loads)(Wrap(origpickle.encode("zlib")).decode("zlib")))
     origpickle = optipickle
     while len(optipickle) < len(origpickle):
         origpickle = optipickle
