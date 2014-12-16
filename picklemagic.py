@@ -52,7 +52,6 @@ def fake_package(name):
         sys.meta_path.insert(0, loader)
         return __import__(name)
 
-
 def remove_fake_package(name):
     # Remove a mounted package tree and all fake packages it has generated
 
@@ -76,45 +75,6 @@ def remove_fake_package(name):
     # It is impossible to kill references to the modules, but all traces
     # of it have been removed from the import machinery and the submodule
     # tree structure has been broken up. 
-
-# isinstance override implementation
-
-import __builtin__
-from __builtin__ import isinstance as _isinstance
-
-def isinstance(obj, classinfo):
-    """
-    This version of isinstance triggers special behavior when obj is a FakeClass Instance
-    or classinfo is a FakeModule instance so the fake modules and classes compare correctly
-    against their real counterparts
-    """
-    if _isinstance(classinfo, (tuple, list)):
-        return any(isinstance(obj, i) for i in classinfo)
-
-    else:
-        klass = obj.__class__
-
-        # If classinfo is a FakeModule instance
-        if _isinstance(classinfo, FakeModule):
-            # Check of the class of obj equals classinfo via classinfo's __eq__ method
-            def walkbases(objclass):
-                return (classinfo.__eq__(objclass) or 
-                        any(walkbases(base) for base in objclass.__bases__))
-            return walkbases(klass)
-
-        # If obj is a FakeClass Instance
-        elif _isinstance(klass, FakeClassType):
-            # The problem here is that comparing the class of a fake class instance
-            # against an actual class would fail (even though they have the same
-            # __module__ and __name__)
-            return (klass.__eq__(classinfo) or 
-                    (bool(klass.__bases__) and 
-                     any(issubclass(base, classobj) for base in klass.__bases__)))
-
-        else:
-            return _isinstance(obj, classinfo)
-
-__builtin__.isinstance = isinstance
 
 # Fake class implementation
 
