@@ -24,7 +24,6 @@
 import sys
 import types
 import pickle
-import pickletools
 from cStringIO import StringIO
 
 # the main API
@@ -46,9 +45,13 @@ def fake_package(name):
     # From a submodule of this package will be served a fake package.
     # Next to this any real module which would be somewhere
     # within this package will be ignored in favour of a fake one
-    loader = FakePackageLoader(name)
-    sys.meta_path.append(loader)
-    return loader.load_module(name)
+    if name in sys.modules and isinstance(sys.modules[name], FakePackage):
+        return sys.modules[name]
+    else:
+        loader = FakePackageLoader(name)
+        sys.meta_path.insert(0, loader)
+        return __import__(name)
+
 
 def remove_fake_package(name):
     # Remove a mounted package tree and all fake packages it has generated
@@ -56,16 +59,16 @@ def remove_fake_package(name):
     # Get the package entry via its entry in sys.modules
     package = sys.modules.get(name, None)
     if package is None:
-        raise Exception("No fake package with the name {} found".format(name))
+        raise Exception("No fake package with the name {0} found".format(name))
 
     if not isinstance(package, FakePackage):
-        raise Exception("The module {} is not a fake package".format(name))
+        raise Exception("The module {0} is not a fake package".format(name))
 
     # Attempt to remove the loader from sys.meta_path
-    try:
-        sys.meta_path.remove(package.__loader__)
-    except ValueError:
-        pass
+
+    loaders = [i for i in sys.meta_path if isinstance(i, FakePackageLoader) and i.root == name]
+    for loader in loaders:
+        sys.meta_path.remove(loader)
 
     # Remove all module and submodule entries from sys.modules
     package._remove()
@@ -139,18 +142,27 @@ class FakeClassType(type):
     def __hash__(self):
         return hash(self.__module__ + "." + self.__name__)
 
+    def __instancecheck__(self, instance):
+        return self.__subclasscheck__(instance.__class__)
+
+    def __subclasscheck__(self, subclass):
+        return (self.__eq__(subclass) or
+                (bool(subclass.__bases__) and
+                 any(self.__subclasscheck__(base) for base in subclass.__bases__)))
+
+
 # Default FakeClass instance methods
 
 def _strict_new(cls, *args):
     self = cls.__bases__[0].__new__(cls)
     if args:
-        raise ValueError("{} was instantiated with unexpected arguments {}".format(cls, args))
+        raise ValueError("{0} was instantiated with unexpected arguments {1}".format(cls, args))
     return self
 
 def _warning_new(cls, *args):
     self = cls.__bases__[0].__new__(cls)
     if args:
-        print "{} was instantiated with unexpected arguments {}".format(cls, args)
+        print "{0} was instantiated with unexpected arguments {1}".format(cls, args)
         self._new_args = args
     return self
 
@@ -168,7 +180,7 @@ def _strict_setstate(self, state):
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
-            raise ValueError("{}.__setstate__() got unexpected arguments {}".format(self.__class__, state))
+            raise ValueError("{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state))
         else:
             self.__dict__.update(state)
         
@@ -186,7 +198,7 @@ def _warning_setstate(self, state):
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
-            print "{}.__setstate__() got unexpected arguments {}".format(self.__class__, state)
+            print "{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state)
             self._setstate_args = state 
         else:
             self.__dict__.update(state)
@@ -248,7 +260,7 @@ class FakeClassFactory(object):
         elif errors == 'ignore':
             self.default_attributes = {"__new__": _ignore_new, "__setstate__": _ignore_setstate}
         else:
-            raise ValueError("Unknown error handling directive '{}' given".format(errors))
+            raise ValueError("Unknown error handling directive '{0}' given".format(errors))
 
     def __call__(self, name, module):
         """
@@ -263,7 +275,7 @@ class FakeClassFactory(object):
 
         special = self.special_cases.get(module + "." + name, None)
 
-        attributes = self.default_methods.copy()
+        attributes = self.default_attributes.copy()
         if special:
             bases, new_attributes = special
             attributes.update(new_attributes)
@@ -291,7 +303,10 @@ class FakeModule(types.ModuleType):
         sys.modules[name] = self
 
     def __repr__(self):
-        return "<module '{}' (fake)>".format(self.__name__)
+        return "<module '{0}' (fake)>".format(self.__name__)
+
+    def __str__(self):
+        return self.__repr__()
 
     def __setattr__(self, name, value):
         # If a fakemodule is removed we need to remove its entry from sys.modules
@@ -305,10 +320,10 @@ class FakeModule(types.ModuleType):
         del self.__dict__[name]
 
     def _remove(self):
-        for i in self.__dict__:
-            if isinstance(i, FakeModule):
-                i._remove()
-            del self.__dict__[i]
+        for i in self.__dict__.keys()[:]:
+            if isinstance(self.__dict__[i], FakeModule):
+                self.__dict__[i]._remove()
+                del self.__dict__[i]
         del sys.modules[self.__name__]
 
     def __eq__(self, other):
@@ -326,9 +341,17 @@ class FakeModule(types.ModuleType):
     def __hash__(self):
         return hash(self.__name__)
 
+    def __instancecheck__(self, instance):
+        return self.__subclasscheck__(instance.__class__)
+
+    def __subclasscheck__(self, subclass):
+        return (self.__eq__(subclass) or
+                (bool(subclass.__bases__) and
+                 any(self.__subclasscheck__(base) for base in subclass.__bases__)))
+
 class FakePackage(FakeModule):
     """
-    A FakeModule which presents FakePackages at any attribute, akkiwubg
+    A FakeModule which presents FakePackages at any attribute, allowing
     you to request any object in this module or any submodule.
     """
     __path__ = []
@@ -376,7 +399,7 @@ class FakeUnpickler(pickle.Unpickler):
     but it still suffers from the dangers of unpickling untrusted data.
     """
     def __init__(self, file, class_factory=None):
-        Unpickler.__init__(self, file)
+        pickle.Unpickler.__init__(self, file)
         self.class_factory = class_factory or FakeClassFactory({}, 'strict')
 
     def find_class(self, module, name):
@@ -386,7 +409,7 @@ class FakeUnpickler(pickle.Unpickler):
                 __import__(module)
             except:
                 mod = FakeModule(module)
-                print "Created module {}".format(str(mod))
+                print "Created module {0}".format(str(mod))
             else:
                 mod = sys.modules[module]
 
@@ -400,7 +423,7 @@ class FakeUnpickler(pickle.Unpickler):
 class SafeUnpickler(FakeUnpickler):
     """
     This unpickler does not attempt to import any module or class definitions unless
-    they're marked as safe by entering their names as a set of striinto `safe_modules`.
+    they're marked as safe by entering their names as a set of strings into `safe_modules`.
     It will attempt to unpickle the given file as close to the original datastructure
     as possible, replacing any pickled objects by FakeClasses.
 
