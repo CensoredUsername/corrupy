@@ -74,7 +74,7 @@ Now for another example, we'll show why you're not supposed to unpickle untruste
 from pickleast import *
 
 import os
-pickle = dumps(Import(os.listdir)(Import(os.getcwd())))
+pickle = dumps(Import(os.listdir)(Import(os.getcwd)()))
 # This pickle will return the contents of the current working directory when unpickled
 
 pickle = dumps(Module("foo", "def bar():\n    print 'I'm foo.bar'"))
