@@ -1,14 +1,47 @@
+# Copyright (c) 2014 CensoredUsername
+
+# This module provides tools for constructing special pickles
+
+
 import types
 import sys
 import pickle
 import cPickle
+
+# Main API
+from cStringIO import StringIO
+
+def dumps(obj):
+    """
+    Create a pickle from an object with special behaviour for PickleAst nodes
+    """
+    file = StringIO()
+    AstPickler(file).dump(obj)
+    return file.getvalue()
+
+def optimize(origpickle):
+    """
+    'optimizes' a pickle by embedding a zlib compressed pickle inside the pickle
+    """
+    return dumps(Import(pickle.loads)(Wrap(origpickle.encode("zlib")).decode("zlib")))
+
+class AstPickler(pickle.Pickler):
+    """
+    Pickler class with special behaviour for PickleBase instances
+    """
+    def save(self, obj):
+        if isinstance(obj, PickleBase):
+            return obj.serialize(self)
+        pickle.Pickler.save(self, obj)
+
+# The base class all pickleast objects inherit from
 
 class PickleBase(object):
     def __call__(self, *args, **kwargs):
         return Call(self, *args, **kwargs)
 
     def __getattr__(self, name):
-        return Call(getattr, self, name)
+        return GetAttr(self, name)
 
     def __cmp__(self, other):
         return CallMethod(self, "__cmp__", other)
@@ -77,13 +110,41 @@ class PickleBase(object):
     def serialize(self, picker):
         return NotImplementedError()
 
+class Wrap(PickleBase):
+    """
+    A simple wrapper class which transforms obj into a PickleBase so the magic methods
+    of picklebase can be used.
+    """
+    def __init__(self, obj):
+        self.obj = obj
+    def serialize(self, pickler):
+        return pickler.save(self.obj)
+
+# from the pickle VM opcodes a few basic operations can be constructed
+# loading an arbitrary object from a module
+# Calling something with an arbitrary amount of arguments
+# either calling obj.__setattr__ or obj.__dict__.update using a dict of kwargs
+# creating a series of objects and only returning the last one
+# These base operations are implemented here
+
 class Call(PickleBase):
+    """
+    This operation represents either calling an object on the pickle VM stack or 
+    Calling __setattr__ or __dict__.update on it depending on what arguments are given.
+
+    If this is called with an object and a set of positional arguments (or no arguments),
+    the object will be called with these arguments at unpickling time.
+
+    If it is however called with keyword arguments, it will call __dict__.update with these
+    keyword arguments and return the object.
+    """
     def __init__(self, callable, *args, **kwargs):
         self.callable = callable
         if args and kwargs:
             raise ValueError("Call() cannot take both initialization arguments and attribute setting keyword arguments")
         self.args = args
         self.kwargs = kwargs
+
     def serialize(self, pickler):
             if self.kwargs:
                 pickler.save(self.callable)
@@ -109,109 +170,145 @@ class Call(PickleBase):
             else:
                 return "Call({})".format(repr(self.callable))
 
-def DelAttr(self, obj, attr):
-    return CallMethod(obj, "__delattr__", attr)
-
-def DelItem(self, obj, attr):
-    return CallMethod(obj, "__delitem__", attr)
-
-def CallMethod(obj, attr, *args):
-    return Call(Call(getattr, obj, attr), *args)
-
-# Some objects lie about their actual __module__ and __name__
-# Notable: types.FunctionType says it's __builtin__.function
-special_cases = {types.FunctionType: ("FunctionType", "types")}
-
-class Pickle(PickleBase):
-    def __init__(self, obj):
-        self.obj = obj
-    def serialize(self):
-        return "\x80\x02" + self.obj.serialize() + "."
-    def __repr__(self):
-        return "Pickle({})".format(repr(self.obj))
-
-class Wrap(PickleBase):
-    def __init__(self, obj):
-        self.obj = obj
-    def serialize(self, pickler):
-        return pickler.save(self.obj)
-
 class Import(Wrap):
+    """
+    This wrapper class will return obj at unpickling time
+
+    Requirements: obj is a top level object in a module
+    """
+    # Some objects lie about their actual __module__ and __name__
+    # Notable: types.FunctionType says it's __builtin__.function
+    special_cases = {types.FunctionType: ("FunctionType", "types")}
+
     def __init__(self, obj):
         try:
-            self.name, self.module = special_cases[obj]
-        except:
+            self.name, self.module = self.special_cases[obj]
+        except KeyError:
             self.name = obj.__name__
             self.module = obj.__module__
+
     def serialize(self, pickler):
         return pickler.write("c{}\n{}\n".format(self.module, self.name))
+
     def __repr__(self):
         return "Import({}.{})".format(self.module, self.name)
 
 class Imports(Import):
+    """
+    This class will return the object `name` in module `module
+    at unpickling time
+    """
     def __init__(self, module, name):
         self.name = name
         self.module = module
 
 class Sequence(PickleBase):
+    """
+    This class represents a series of objects, where only the last return
+    value of the sequence will be returned at unpickling time
+    """
     def __init__(self, *objects):
         self.objects = objects[:-1]
         self.result = objects[-1]
+
     def serialize(self, pickler):
         pickler.write(pickle.MARK)
         for obj in self.objects:
             pickler.save(obj)
         pickler.write(pickle.POP_MARK)
         pickler.save(self.result)
+
     def __repr__(self):
         return "Sequence({}|{})".format(", ".join(repr(i) for i in self.objects), repr(self.result))
 
+# From here on we define sets of convenience functions and wrappers useful for making easy pickle programs
+
+# Data structure wrappers
+List = Import(list)
+Dict = Import(dict)
+Set = Import(set)
+Tuple = Import(tuple)
+Frozenset = Import(frozenset)
+
+# Functional programming
+Any = Import(any)
+All = Import(all)
+Apply = Import(apply)
+Map = Import(map)
+Zip = Import(zip)
+Reduce = Import(reduce)
+
+# Imspection
+HasAttr = Import(hasattr)
+GetAttr = Import(getattr)
+SetAttr = Import(setattr)
+DelAttr = Import(delattr)
+IsInstance = Import(isinstance)
+IsSubclass = Import(issubclass)
+
+# Iterators
+Iter = Import(iter)
+Next = Import(next)
+
+# Other convenience functions
+Globals = Import(globals)
+Locals = Import(locals)
+Compile = Import(compile)
+
+# Setitem needs implementation
+
+def DelItem(self, obj, attr):
+    # Since you can't save the return value of del a[i] this is necessary
+    return CallMethod(obj, "__delitem__", attr)
+
+def CallMethod(obj, attr, *args):
+    return GetAttr(obj, attr)(*args)
+
+# Specials
+
+# Should add some kind of "variable" manipulation using the pickle memo
+
 def Module(name, code):
+    """
+    This node creates a module at importing time.
+    It simply takes the name of the module and the code in the module as a string
+
+    it returns the module
+    """
     return Sequence(
                 Import(types.FunctionType)(
-                    Import(compile)("""
+                    Compile("""
 import imp, sys
 {0} = imp.new_module("{0}")
 exec {1} in {0}.__dict__
 sys.modules["{0}"] = {0}""".format(name, repr(code)), 
                         "<pickle>", 
                         "exec"), 
-                    Import(globals)(),
+                    Globals(),
                     'exe'
                     )(),
                 Imports("sys", "modules")[name])
 
 def Exec(string):
+    """
+    This node executes `string` in the global namespace (this will usually be the
+    pickle module namespace)
+
+    This is implemented by exec'ing the code within a dynamically created anonymous function
+
+    It returns None
+    """
     return Import(types.FunctionType)(
-                Import(compile)(
+                Compile(
                     "exec {} in globals()".format(repr(string)), 
                     "<pickle>", 
                     "exec"), 
-                Import(globals)(),
+                Globals(),
                 'exe'
                 )()
 
-#####################################
-from cStringIO import StringIO
-
-def dumps(obj):
-    file = StringIO()
-    AstPickler(file).dump(obj)
-    return file.getvalue()
-
-def optimize_dumps(origpickle):
-    optipickle = dumps(Import(pickle.loads)(Wrap(origpickle.encode("zlib")).decode("zlib")))
-    origpickle = optipickle
-    while len(optipickle) < len(origpickle):
-        origpickle = optipickle
-        optipickle = dumps(Import(cPickle.loads)(Wrap(origpickle.encode("zlib")).decode("zlib")))
-    return origpickle
-
-class AstPickler(pickle.Pickler):
-    def save(self, obj):
-        if isinstance(obj, PickleBase):
-            return obj.serialize(self)
-        pickle.Pickler.save(self, obj)
-
-
-
+def Eval(code):
+    """
+    This node executes `code` in the global (pickle module) namespace and returns the result
+    """
+    return Import(eval)(code, Globals())
