@@ -3,9 +3,17 @@
 # This module provides tools for safely analyizing pickle files programmatically
 
 import sys
+
+PY3 = sys.version_info >= (3, 0)
+PY2 = not PY3
+
 import types
 import pickle
-from cStringIO import StringIO
+
+if PY3:
+    from io import BytesIO as StringIO
+else:
+    from cStringIO import StringIO
 
 # the main API
 
@@ -94,20 +102,20 @@ class FakeClassType(type):
 
 # Default FakeClass instance methods
 
-def _strict_new(cls, *args):
+def _strict_new(cls, *args, *kwargs):
     self = cls.__bases__[0].__new__(cls)
     if args:
-        raise ValueError("{0} was instantiated with unexpected arguments {1}".format(cls, args))
+        raise ValueError("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
     return self
 
-def _warning_new(cls, *args):
+def _warning_new(cls, *args, *kwargs):
     self = cls.__bases__[0].__new__(cls)
     if args:
-        print "{0} was instantiated with unexpected arguments {1}".format(cls, args)
+        print("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
         self._new_args = args
     return self
 
-def _ignore_new(cls, *args):
+def _ignore_new(cls, *args, *kwargs):
     return cls.__bases__[0].__new__(cls)
 
 def _strict_setstate(self, state):
@@ -139,7 +147,7 @@ def _warning_setstate(self, state):
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
-            print "{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state)
+            print("{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state))
             self._setstate_args = state 
         else:
             self.__dict__.update(state)
@@ -328,8 +336,11 @@ class FakePackageLoader(object):
         return FakePackage(fullname)
 
 # Fake unpickler implementation
-
-class FakeUnpickler(pickle.Unpickler):
+if PY2:
+    unpickler_base = pickle.Unpickler
+else:
+    unpickler_base = pickle._Unpickler
+class FakeUnpickler(unpickler_base):
     """
     This unpickler behaves like a normal unpickler as long as it can import
     the modules and classes that are requested in the pickle. If however it 
@@ -350,7 +361,7 @@ class FakeUnpickler(pickle.Unpickler):
                 __import__(module)
             except:
                 mod = FakeModule(module)
-                print "Created module {0}".format(str(mod))
+                print("Created module {0}".format(str(mod)))
             else:
                 mod = sys.modules[module]
 

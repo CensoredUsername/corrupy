@@ -2,51 +2,77 @@
 
 # This module provides tools for constructing special pickles
 
+import sys
+
+PY3 = sys.version_info >= (3, 0)
+PY2 = not PY3
+
+import types
+import zlib
+
+if PY3:
+    from io import BytesIO as StringIO
+else:
+    from cStringIO import StringIO
 
 import pickle
-import cPickle
 import pickletools
 
 # Main API
-import itertools
-import types
-import sys
-import zlib
-from cStringIO import StringIO
 
 def dumps(obj, protocol=2):
     """
     Create a pickle from an object with special behaviour for PickleAst nodes
     """
     file = StringIO()
-    AstPickler(file, protocol).dump(obj)
+    dump(obj, file, protocol)
     return file.getvalue()
+
+def dump(obj, file=None, protocol=2):
+    """
+    Dump pickle into file
+    """
+    AstPickler(file, protocol).dump(obj)
 
 def optimize(origpickle, protocol=2):
     """
-    'optimizes' a pickle by embedding a zlib compressed pickle inside the pickle
+    'optimizes' a pickle by stripping extraenous PUT instructions and 
+    embedding a zlib compressed pickle inside the pickle
     """
-    origpickle = pickletools.optimize(origpickle)
     return pickletools.optimize(
                dumps(
                    Import(pickle.loads)(
-                       Wrap(
+                       Imports(
+                           "zlib", 
+                           "decompress"
+                           )(
                            zlib.compress(
                                pickletools.optimize(origpickle), 
                                9)
-                           ).decode("zlib")
+                           )
                        ),
-                   2)
+                   protocol)
                )
 
-class AstPickler(pickle.Pickler):
+if PY2:
+    pickler_base = pickle.Pickler
+else:
+    pickler_base = pickle._Pickler
+class AstPickler(pickler_base):
     """
     Pickler class with special behaviour for PickleBase instances
     """
-    def save(self, obj):
-        if isinstance(obj, PickleBase):
-            return obj.serialize(self)
-        pickle.Pickler.save(self, obj)
+    if PY2:
+        def save(self, obj):
+            if isinstance(obj, PickleBase):
+                return obj.serialize(self)
+            pickle.Pickler.save(self, obj)
+    else:
+        def save(self, obj):
+            self.framer.commit_frame()
+            if isinstance(obj, PickleBase):
+                return obj.serialize(self)
+            super().save(obj)
 
 # The base class all pickleast objects inherit from
 
@@ -181,16 +207,21 @@ class Call(PickleBase):
             else:
                 return "Call({})".format(repr(self.callable))
 
-
 class Imports(Wrap):
     """
     This class will return the object `name` in module `module
     at unpickling time
     """
-    def __init__(self, module, name, cache=True):
-        self.name = name
-        self.module = module
-        self.cache = cache
+    if PY2:
+        def __init__(self, module, name, cache=True):
+            self.name = name
+            self.module = module
+            self.cache = cache
+    else:
+        def __init__(self, module, name, cache=True):
+            self.name = name.encode("utf-8")
+            self.module = module.encode("utf-8")
+            self.cache = cache
 
     def serialize(self, pickler):
         if self.cache:
@@ -281,8 +312,6 @@ class Assign(PickleBase):
     This returns `value`.
     """
     def __init__(self, varname, value):
-        if '\n' in varname or '\r' in varname:
-            raise ValueError("Don't use line breaks in a varname") 
         self.varname = varname
         self.value = value
 
@@ -305,8 +334,6 @@ class Load(PickleBase):
     This returns `value`
     """
     def __init__(self, varname):
-        if '\n' in varname or '\r' in varname:
-            raise ValueError("Don't use line breaks in a varname") 
         self.varname = varname
 
     def serialize(self, pickler):
@@ -336,6 +363,7 @@ def LoadGlobal(varname):
 # From here on we define sets of convenience functions and wrappers useful for making easy pickle programs
 
 # Data structure wrappers
+# These are really not that necessary since special pickle opcodes exist for them already
 List = Import(list)
 Dict = Import(dict)
 Set = Import(set)
@@ -347,7 +375,6 @@ Any = Import(any)
 All = Import(all)
 Map = Import(map)
 Zip = Import(zip)
-Reduce = Import(reduce)
 
 # Imspection
 HasAttr = Import(hasattr)
@@ -384,21 +411,27 @@ def DeclareModule(name):
                Imports("imp", "new_module")(name)
            )[name]
 
-def DefineModule(name, code):
-    code = '\n'.join(line for line in code.splitlines() if line.split("#")[0].strip())
+if PY2:
+    def DefineModule(name, code):
+        code = '\n'.join(line for line in code.splitlines() if line.split("#")[0].strip())
 
-    return Sequence(
-               AssignGlobal("_c", code),
-               AssignGlobal("_m", GetModule(name)),
-               Import(types.FunctionType)(
-                   Compile("exec _c in _m.__dict__", "<{0}>".format(name), "exec"),
-                   Globals(),
-                   'exe'
-                   )()
-               )
+        return Sequence(
+                   AssignGlobal("_c", code),
+                   AssignGlobal("_m", GetModule(name)),
+                   Import(types.FunctionType)(
+                       Compile("exec _c in _m.__dict__", "<{0}>".format(name), "exec"),
+                       Globals(),
+                       'exe'
+                       )()
+                   )
+else:
+    def DefineModule(name, code):
+        code = '\n'.join(line for line in code.splitlines() if line.split("#")[0].strip())
+
+        return Imports("builtins", "exec")(code, GetAttr(GetModule(name), "__dict__"))
 
 def GetModule(name):
-    return Imports("__builtin__", "__import__")(name)
+    return Import(__import__)(name)
 
 def Module(name, code):
     """
@@ -413,26 +446,36 @@ def Module(name, code):
                 GetModule(name)
                 )
 
-def Exec(string):
-    """
-    This node executes `string` in the global namespace (this will usually be the
-    pickle module namespace)
+if PY2:
+    def Exec(string):
+        """
+        This node executes `string` in the global namespace (this will usually be the
+        pickle module namespace)
 
-    This is implemented by exec'ing the code within a dynamically created anonymous function
+        This is implemented by exec'ing the code within a dynamically created anonymous function
 
-    It returns None
-    """
-    return Sequence(
-               AssignGlobal("_c", string),
-               Import(types.FunctionType)(
-                   Compile(
-                       "exec _c in globals()", 
-                       "<pickle>", 
-                       "exec"), 
-                   Globals(),
-                   'exe'
-                   )()
-               )
+        It returns None
+        """
+        return Sequence(
+                   AssignGlobal("_c", string),
+                   Import(types.FunctionType)(
+                       Compile(
+                           "exec _c in globals()", 
+                           "<pickle>", 
+                           "exec"), 
+                       Globals(),
+                       'exe'
+                       )()
+                   )
+else:
+    def Exec(string):
+        """
+        This node executes `string` in the global namespace (this will usually be the
+        pickle module namespace)
+
+        It returns None
+        """
+        return Imports("builtins", "exec")(string, Globals())
 
 def Eval(code):
     """
