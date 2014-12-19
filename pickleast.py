@@ -3,27 +3,31 @@
 # This module provides tools for constructing special pickles
 
 
-import types
-import sys
 import pickle
 import cPickle
+import pickletools
 
 # Main API
+import itertools
+import types
+import sys
+import zlib
 from cStringIO import StringIO
 
-def dumps(obj):
+def dumps(obj, protocol=2):
     """
     Create a pickle from an object with special behaviour for PickleAst nodes
     """
     file = StringIO()
-    AstPickler(file).dump(obj)
+    AstPickler(file, protocol).dump(obj)
     return file.getvalue()
 
 def optimize(origpickle):
     """
     'optimizes' a pickle by embedding a zlib compressed pickle inside the pickle
     """
-    return dumps(Import(pickle.loads)(Wrap(origpickle.encode("zlib")).decode("zlib")))
+    origpickle = pickletools.optimize(origpickle)
+    return dumps(Import(pickle.loads)(Wrap(zlib.compress(origpickle, 9)).decode("zlib")))
 
 class AstPickler(pickle.Pickler):
     """
@@ -125,6 +129,7 @@ class Wrap(PickleBase):
 # Calling something with an arbitrary amount of arguments
 # either calling obj.__setattr__ or obj.__dict__.update using a dict of kwargs
 # creating a series of objects and only returning the last one
+# Storing and loading variables from the memo
 # These base operations are implemented here
 
 class Call(PickleBase):
@@ -148,16 +153,12 @@ class Call(PickleBase):
     def serialize(self, pickler):
             if self.kwargs:
                 pickler.save(self.callable)
-                pickler.write(pickle.MARK)
-                pickler.save(None)
-                pickler.save(self.kwargs)
-                pickler.write(pickle.TUPLE+pickle.BUILD)
+                pickler.save((None, self.kwargs))
+                pickler.write(pickle.BUILD)
             else:
                 pickler.save(self.callable)
-                pickler.write(pickle.MARK)
-                for i in self.args:
-                    pickler.save(i)
-                pickler.write(pickle.TUPLE+pickle.REDUCE)
+                pickler.save(tuple(self.args))
+                pickler.write(pickle.REDUCE)
 
     def __repr__(self):
         if self.kwargs:
@@ -170,7 +171,35 @@ class Call(PickleBase):
             else:
                 return "Call({})".format(repr(self.callable))
 
-class Import(Wrap):
+
+class Imports(Wrap):
+    """
+    This class will return the object `name` in module `module
+    at unpickling time
+    """
+    def __init__(self, module, name, cache=True):
+        self.name = name
+        self.module = module
+        self.cache = cache
+
+    def serialize(self, pickler):
+        if self.cache:
+            tup = (self.module, self.name)
+            if tup in pickler.memo:
+                index = pickler.memo[tup]
+                pickler.write(pickler.get(index))
+            else:
+                memo_len = len(pickler.memo)
+                pickler.memo[tup] = memo_len
+                pickler.write(pickle.GLOBAL + self.module + '\n' + self.name  + '\n')
+                pickler.write(pickler.put(memo_len))
+        else:
+            pickler.write(pickle.GLOBAL + self.module + '\n' + self.name  + '\n')
+
+    def __repr__(self):
+        return "Import({}.{})".format(self.module, self.name)
+
+class Import(Imports):
     """
     This wrapper class will return obj at unpickling time
 
@@ -180,27 +209,13 @@ class Import(Wrap):
     # Notable: types.FunctionType says it's __builtin__.function
     special_cases = {types.FunctionType: ("FunctionType", "types")}
 
-    def __init__(self, obj):
+    def __init__(self, obj, cache=True):
         try:
-            self.name, self.module = self.special_cases[obj]
+            name, module = self.special_cases[obj]
         except KeyError:
-            self.name = obj.__name__
-            self.module = obj.__module__
-
-    def serialize(self, pickler):
-        return pickler.write("c{}\n{}\n".format(self.module, self.name))
-
-    def __repr__(self):
-        return "Import({}.{})".format(self.module, self.name)
-
-class Imports(Import):
-    """
-    This class will return the object `name` in module `module
-    at unpickling time
-    """
-    def __init__(self, module, name):
-        self.name = name
-        self.module = module
+            name = obj.__name__
+            module = obj.__module__
+        super(Import, self).__init__(module, name, cache)
 
 class Sequence(PickleBase):
     """
@@ -208,8 +223,17 @@ class Sequence(PickleBase):
     value of the sequence will be returned at unpickling time
     """
     def __init__(self, *objects):
-        self.objects = objects[:-1]
-        self.result = objects[-1]
+        # Greedily combine sequences for optimization purposes
+        new_objects = []
+        for i in objects:
+            if isinstance(i, Sequence):
+                new_objects.extend(i.objects)
+                new_objects.append(i.result)
+            else:
+                new_objects.append(i)
+
+        self.objects = new_objects[:-1]
+        self.result = new_objects[-1]
 
     def serialize(self, pickler):
         pickler.write(pickle.MARK)
@@ -220,6 +244,88 @@ class Sequence(PickleBase):
 
     def __repr__(self):
         return "Sequence({}|{})".format(", ".join(repr(i) for i in self.objects), repr(self.result))
+
+class SetItem(PickleBase):
+    """
+    This class provides the equivalent of object[key] = value.
+    This returns object
+    """
+    def __init__(self, object, key, value):
+        self.obj = object
+        self.key = key
+        self.value = value
+
+    def serialize(self, pickler):
+        pickler.save(self.obj)
+        pickler.save(self.key)
+        pickler.save(self.value)
+        pickler.write(pickle.SETITEM)
+
+    def __repr__(self):
+        return "{0}[{1}] = {2}".format(repr(self.obj), repr(self.key), repr(self.value))
+
+class Assign(PickleBase):
+    """
+    This class stores `value` in `varname`. This is implemented as
+    pushing the value on to the memo.
+    This returns `value`.
+    """
+    def __init__(self, varname, value):
+        if '\n' in varname or '\r' in varname:
+            raise ValueError("Don't use line breaks in a varname") 
+        self.varname = varname
+        self.value = value
+
+    def serialize(self, pickler):
+        pickler.save(self.value)
+        pickler.write(pickle.PUT)
+        if self.varname in pickler.memo:
+            pickler.write(pickler.memo[self.varname])
+        else:
+            memo_len = len(pickler.memo)
+            pickler.memo[self.varname] = memo_len
+            pickler.write(repr(memo_len))
+        pickler.write('\n')
+
+    def __repr__(self):
+        return "{0} = {1}".format(self.varname, repr(self.value))
+
+class Load(PickleBase):
+    """
+    This class loads the `value` from `varname`.
+    This is implemented by getting the value from the memo.
+    This returns `value`
+    """
+    def __init__(self, varname):
+        if '\n' in varname or '\r' in varname:
+            raise ValueError("Don't use line breaks in a varname") 
+        self.varname = varname
+
+    def serialize(self, pickler):
+        pickler.write(pickle.GET)
+        if self.varname not in self.memo:
+            raise ValueError("attempted to use variable {1} but it hasn't been defined yet".format(varname))
+        pickler.write(repr(pickler.memo[self.varname]))
+        pickler.write("\n")
+
+    def __repr__(self):
+        return self.varname
+
+def AssignGlobal(varname, value):
+    """
+    Assigns `value` to `varname` in the global namespace (to interact with exec and eval blocks)
+    This is implemented as globals()[varname] = value
+    THis returns `value`
+    """
+    return SetItem(Globals(), varname, value)[varname]
+
+def LoadGlobal(varname):
+    """
+    Loads `varname` from the global namespace
+    This is implemented as globals()[varname]
+    """
+    return Globals()[varname]
+
 
 # From here on we define sets of convenience functions and wrappers useful for making easy pickle programs
 
@@ -233,7 +339,6 @@ Frozenset = Import(frozenset)
 # Functional programming
 Any = Import(any)
 All = Import(all)
-Apply = Import(apply)
 Map = Import(map)
 Zip = Import(zip)
 Reduce = Import(reduce)
@@ -266,7 +371,28 @@ def CallMethod(obj, attr, *args):
 
 # Specials
 
-# Should add some kind of "variable" manipulation using the pickle memo
+def DeclareModule(name):
+    return SetItem(
+               Imports("sys", "modules"), 
+               name, 
+               Imports("imp", "new_module")(name)
+           )[name]
+
+def DefineModule(name, code):
+    code = '\n'.join(line for line in code.splitlines() if line.split("#")[0].strip())
+
+    return Sequence(
+               AssignGlobal("_c", code),
+               AssignGlobal("_m", GetModule(name)),
+               Import(types.FunctionType)(
+                   Compile("exec _c in _m.__dict__", "<{0}>".format(name), "exec"),
+                   Globals(),
+                   'exe'
+                   )()
+               )
+
+def GetModule(name):
+    return Imports("__builtin__", "__import__")(name)
 
 def Module(name, code):
     """
@@ -276,18 +402,10 @@ def Module(name, code):
     it returns the module
     """
     return Sequence(
-                Import(types.FunctionType)(
-                    Compile("""
-import imp, sys
-{0} = imp.new_module("{0}")
-exec {1} in {0}.__dict__
-sys.modules["{0}"] = {0}""".format(name, repr(code)), 
-                        "<pickle>", 
-                        "exec"), 
-                    Globals(),
-                    'exe'
-                    )(),
-                Imports("sys", "modules")[name])
+                DeclareModule(name),
+                DefineModule(name, code),
+                GetModule(name)
+                )
 
 def Exec(string):
     """
@@ -298,14 +416,17 @@ def Exec(string):
 
     It returns None
     """
-    return Import(types.FunctionType)(
-                Compile(
-                    "exec {} in globals()".format(repr(string)), 
-                    "<pickle>", 
-                    "exec"), 
-                Globals(),
-                'exe'
-                )()
+    return Sequence(
+               AssignGlobal("_c", string),
+               Import(types.FunctionType)(
+                   Compile(
+                       "exec _c in globals()", 
+                       "<pickle>", 
+                       "exec"), 
+                   Globals(),
+                   'exe'
+                   )()
+               )
 
 def Eval(code):
     """
