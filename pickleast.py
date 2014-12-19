@@ -22,12 +22,22 @@ def dumps(obj, protocol=2):
     AstPickler(file, protocol).dump(obj)
     return file.getvalue()
 
-def optimize(origpickle):
+def optimize(origpickle, protocol=2):
     """
     'optimizes' a pickle by embedding a zlib compressed pickle inside the pickle
     """
     origpickle = pickletools.optimize(origpickle)
-    return dumps(Import(pickle.loads)(Wrap(zlib.compress(origpickle, 9)).decode("zlib")))
+    return pickletools.optimize(
+               dumps(
+                   Import(pickle.loads)(
+                       Wrap(
+                           zlib.compress(
+                               pickletools.optimize(origpickle), 
+                               9)
+                           ).decode("zlib")
+                       ),
+                   2)
+               )
 
 class AstPickler(pickle.Pickler):
     """
@@ -278,14 +288,12 @@ class Assign(PickleBase):
 
     def serialize(self, pickler):
         pickler.save(self.value)
-        pickler.write(pickle.PUT)
         if self.varname in pickler.memo:
-            pickler.write(pickler.memo[self.varname])
+            pickler.write(pickler.put(pickler.memo[self.varname]))
         else:
             memo_len = len(pickler.memo)
             pickler.memo[self.varname] = memo_len
-            pickler.write(repr(memo_len))
-        pickler.write('\n')
+            pickler.write(pickler.put(memo_len))
 
     def __repr__(self):
         return "{0} = {1}".format(self.varname, repr(self.value))
@@ -302,11 +310,9 @@ class Load(PickleBase):
         self.varname = varname
 
     def serialize(self, pickler):
-        pickler.write(pickle.GET)
         if self.varname not in self.memo:
             raise ValueError("attempted to use variable {1} but it hasn't been defined yet".format(varname))
-        pickler.write(repr(pickler.memo[self.varname]))
-        pickler.write("\n")
+        pickler.write(pickler.get(pickler.memo[self.varname]))
 
     def __repr__(self):
         return self.varname
