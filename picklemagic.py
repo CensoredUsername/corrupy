@@ -17,23 +17,70 @@ else:
 
 # the main API
 
-def load(file, class_factory=None):
-    return FakeUnpickler(file, class_factory).load()
+def load(file, class_factory=None,
+         encoding="bytes", errors="strict"):
+    """
+    Return the datastructure described in `file` making up any
+    unimportable modules using `class_factory`.
 
-def loads(string, class_factory=None):
-    return FakeUnpickler(StringIO(string), class_factory).load()
+    `encoding` and `errors` control how pickle protocol 2 and below
+    bytestrings are handled in python 3
+    """
+    return FakeUnpickler(file, class_factory,
+                         encoding=encoding, errors=errors).load()
 
-def safe_load(file, class_factory=None, safe_modules=()):
-    return SafeUnpickler(file, class_factory, safe_modules).load()
+def loads(string, class_factory=None,
+          encoding="bytes", errors="strict"):
+    """
+    Return the datastructure described in `string` making up any
+    unimportable modules using `class_factory`.
 
-def safe_loads(string, class_factory=None, safe_modules=()):
-    return SafeUnpickler(StringIO(string), class_factory, safe_modules).load()
+    `encoding` and `errors` control how pickle protocol 2 and below
+    bytestrings are handled in python 3
+    """
+    return FakeUnpickler(StringIO(string), class_factory,
+                         encoding=encoding, errors=errors).load()
+
+def safe_load(file, class_factory=None, safe_modules=(),
+              encoding="bytes", errors="strict"):
+    """
+    Return the datastructure described in `file` exchanging any
+    references to class definitions by FakeClass instances from 
+    `class_factory` unless the module they should be imported from
+    is mentioned as a string in `safe_modules`.
+
+    `encoding` and `errors` control how pickle protocol 2 and below
+    bytestrings are handled in python 3
+    """
+    return SafeUnpickler(file, class_factory, safe_modules,
+                         encoding=encoding, errors=errors).load()
+
+def safe_loads(string, class_factory=None, safe_modules=(),
+               encoding="bytes", errors="strict"):
+    """
+    Return the datastructure described in `string` exchanging any
+    references to class definitions by FakeClass instances from
+    `class_factory` unless the module they should be imported from
+    is mentioned as a string in `safe_modules`.
+
+    `encoding` and `errors` control how pickle protocol 2 and below
+    bytestrings are handled in python 3
+    """
+    return SafeUnpickler(StringIO(string), class_factory, safe_modules,
+                         encoding=encoding, errors=errors).load()
 
 def fake_package(name):
-    # Mount a fake package tree. This means that any request to import
-    # From a submodule of this package will be served a fake package.
-    # Next to this any real module which would be somewhere
-    # within this package will be ignored in favour of a fake one
+    """
+    Mounts a fake package tree with the name `name`. This means that 
+    any request to import a module with this name or a submodule of it
+    will result in importing a FakePackage which can be used to compare
+    against FakeModules and FakeClasses created by loads and safe_loads.
+
+    If a fake package with that name was already created, this function
+    will not create another one.
+
+    This returns the created FakePackage
+    """
     if name in sys.modules and isinstance(sys.modules[name], FakePackage):
         return sys.modules[name]
     else:
@@ -42,7 +89,14 @@ def fake_package(name):
         return __import__(name)
 
 def remove_fake_package(name):
-    # Remove a mounted package tree and all fake packages it has generated
+    """
+    Removes a fake package tree. This is implemented by first removing any
+    FakePackageLoaders for `name` from sys.path, finding the top-level
+    FakePackage created by fake_package, and then walking the tree of created
+    FakePackages, removing their references to each other and removing them 
+    from sys.modules. This ensures that any FakePackages not directly referenced
+    by user code will be destroyed
+    """
 
     # Get the package entry via its entry in sys.modules
     package = sys.modules.get(name, None)
@@ -102,26 +156,26 @@ class FakeClassType(type):
 
 # Default FakeClass instance methods
 
-def _strict_new(cls, *args, *kwargs):
+def _strict_new(cls, *args, **kwargs):
     self = cls.__bases__[0].__new__(cls)
     if args:
         raise ValueError("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
     return self
 
-def _warning_new(cls, *args, *kwargs):
+def _warning_new(cls, *args, **kwargs):
     self = cls.__bases__[0].__new__(cls)
     if args:
         print("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
         self._new_args = args
     return self
 
-def _ignore_new(cls, *args, *kwargs):
+def _ignore_new(cls, *args, **kwargs):
     return cls.__bases__[0].__new__(cls)
 
 def _strict_setstate(self, state):
     slotstate = None
 
-    if (isinstance(state, tuple) and len(state) == 2 and 
+    if (isinstance(state, tuple) and len(state) == 2 and
         (state[0] is None or isinstance(state[0], dict)) and
         (state[1] is None or isinstance(state[1], dict))):
         state, slotstate = state
@@ -259,7 +313,10 @@ class FakeModule(types.ModuleType):
 
     def __setattr__(self, name, value):
         # If a fakemodule is removed we need to remove its entry from sys.modules
-        if name in self.__dict__ and isinstance(self.__dict__[name], FakeModule) and not isinstance(value, FakeModule):
+        if (name in self.__dict__ and
+            isinstance(self.__dict__[name], FakeModule) and not
+            isinstance(value, FakeModule)):
+
             self.__dict__[name]._remove()
         self.__dict__[name] = value
 
@@ -336,11 +393,7 @@ class FakePackageLoader(object):
         return FakePackage(fullname)
 
 # Fake unpickler implementation
-if PY2:
-    unpickler_base = pickle.Unpickler
-else:
-    unpickler_base = pickle._Unpickler
-class FakeUnpickler(unpickler_base):
+class FakeUnpickler(pickle.Unpickler if PY2 else pickle._Unpickler):
     """
     This unpickler behaves like a normal unpickler as long as it can import
     the modules and classes that are requested in the pickle. If however it 
@@ -350,9 +403,16 @@ class FakeUnpickler(unpickler_base):
     This means that this pickle is as close to the original data as possible,
     but it still suffers from the dangers of unpickling untrusted data.
     """
-    def __init__(self, file, class_factory=None):
-        pickle.Unpickler.__init__(self, file)
-        self.class_factory = class_factory or FakeClassFactory({}, 'strict')
+    if PY2:
+        def __init__(self, file, class_factory=None,
+                     encoding="bytes", errors="strict"):
+            pickle.Unpickler.__init__(self, file)
+            self.class_factory = class_factory or FakeClassFactory({}, 'strict')
+    else:
+        def __init__(self, file, class_factory=None,
+                     encoding="bytes", errors="strict"):
+            super().__init__(file, fix_imports=False, encoding=encoding, errors=errors)
+            self.class_factory = class_factory or FakeClassFactory({}, 'strict')
 
     def find_class(self, module, name):
         mod = sys.modules.get(module, None)
@@ -388,8 +448,10 @@ class SafeUnpickler(FakeUnpickler):
     raise an UnpicklingError
     """
 
-    def __init__(self, file, class_factory=None, safe_modules=()):
-        FakeUnpickler.__init__(self, file, class_factory)
+    def __init__(self, file, class_factory=None, safe_modules=(),
+                 encoding="bytes", errors="strict"):
+        FakeUnpickler.__init__(self, file, class_factory,
+                               encoding=encoding, errors=errors)
         # A set of modules which are safe to load
         self.safe_modules = set(safe_modules)
 

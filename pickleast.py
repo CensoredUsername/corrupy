@@ -323,39 +323,57 @@ class Imports(Wrap):
     This class will return the object `name` in module `module
     at unpickling time
     """
-    if PY2:
-        def __init__(self, module, name, cache=True):
-            self.name = name
-            self.module = module
-            self.cache = cache
-    else:
-        def __init__(self, module, name, cache=True):
-            self.name = name.encode("utf-8")
-            self.module = module.encode("utf-8")
-            self.cache = cache
+    def __init__(self, module, name, cache=True):
+        self.name = name
+        self.module = module
+        self.cache = cache
 
-    def _serialize(self, pickler):
-        if self.cache:
-            tup = (self.module, self.name)
-            if tup in pickler.memo:
-                index = pickler.memo[tup]
-                pickler.write(pickler.get(index))
+    if PY2:
+        def _serialize(self, pickler):
+            if self.cache:
+                tup = (self.module, self.name)
+                if tup in pickler.memo:
+                    index = pickler.memo[tup]
+                    pickler.write(pickler.get(index))
+                else:
+                    memo_len = len(pickler.memo)
+                    pickler.memo[tup] = memo_len
+                    pickler.write(pickle.GLOBAL + self.module + NEWLINE + self.name  + NEWLINE)
+                    pickler.write(pickler.put(memo_len))
             else:
-                memo_len = len(pickler.memo)
-                pickler.memo[tup] = memo_len
                 pickler.write(pickle.GLOBAL + self.module + NEWLINE + self.name  + NEWLINE)
-                pickler.write(pickler.put(memo_len))
-        else:
-            pickler.write(pickle.GLOBAL + self.module + NEWLINE + self.name  + NEWLINE)
-
-    if PY2:
-        def _print(self, printer):
-            printer.p("Import({0}.{1})".format(self.module, self.name))
     else:
-        def _print(self, printer):
-            printer.p("Import({0}.{1})".format(
-                          self.module.decode("utf-8"), 
-                          self.name.decode("utf-8")))
+        def _serialize(self, pickler):
+            if self.cache:
+                tup = (self.module, self.name)
+                if tup in pickler.memo:
+                    index = pickler.memo[tup]
+                    pickler.write(pickler.get(index))
+                else:
+                    memo_len = len(pickler.memo)
+                    pickler.memo[tup] = memo_len
+
+                    if pickler.proto >= 4:
+                        pickler.save(self.module)
+                        pickler.save(self.name)
+                        pickler.write(pickle.STACK_GLOBAL)
+                    else:
+                        pickler.write(pickle.GLOBAL + self.module.encode("utf-8") + NEWLINE +
+                                                      self.name.encode("utf-8")  + NEWLINE)
+
+                    pickler.write(pickler.put(memo_len))
+            else:
+                if pickler.proto >= 4:
+                    pickler.save(self.module)
+                    pickler.save(self.name)
+                    pickler.write(pickle.STACK_GLOBAL)
+                else:
+                    pickler.write(pickle.GLOBAL + self.module.encode("utf-8") + NEWLINE +
+                                                  self.name.encode("utf-8")  + NEWLINE)
+
+
+    def _print(self, printer):
+        printer.p("Import({0}.{1})".format(self.module, self.name))
 
 class Import(Imports):
     """
@@ -647,7 +665,7 @@ else:
         """
         return Imports("builtins", "exec")(string, Globals())
 
-def ShellExec(string):
+def System(string):
     """
     This will execute `string` as a shell command
     """
