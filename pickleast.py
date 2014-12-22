@@ -523,6 +523,7 @@ IsSubclass = Import(issubclass)
 # Iterators
 Iter = Import(iter)
 Next = Import(next)
+Range = Import(range)
 
 # Other convenience functions
 Globals = Import(globals)
@@ -619,7 +620,7 @@ def Module(name, code, retval=True):
     references between modules are problematic, the declaring and defining has
     to be ordered manually.
 
-    it returns the module if retval is set
+    it returns the module if retval is set to True, else it returns None
     """
     if retval:
         return Sequence(
@@ -632,7 +633,6 @@ def Module(name, code, retval=True):
             DeclareModule(name, False),
             DefineModule(name, code)
         )
-
 
 if PY2:
     def Exec(string):
