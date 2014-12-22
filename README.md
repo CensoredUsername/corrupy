@@ -80,7 +80,7 @@ import os
 pickle = dumps(Import(os.listdir)(Import(os.getcwd)()))
 # This pickle will return the contents of the current working directory when unpickled
 
-pickle = dumps(Module("foo", "def bar():\n    print 'I'm foo.bar'"))
+pickle = dumps(Module("foo", "def bar():\n    print 'I\\'m foo.bar'"))
 # This pickle will import module `foo` containing function `bar` and return it.
 
 pickle = dumps(Imports("random", "randint")(0, 10))
