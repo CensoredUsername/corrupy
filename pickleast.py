@@ -255,7 +255,7 @@ class Wrap(PickleBase):
 # Call(object, **kwargs): Setting attributes of an object (unless it has __setstate__ implemented)
 # [object (None, kwargs)] - BUILD
 # Import[s](module.name): Loading a top-level attribute of a module
-# [] - c module \n name \n
+# [] - GLOBAL module \n name \n or ["module" "name"] STACK_GLOBAL (pickle protocol 4, python 3.4)
 # Sequence(*operations): Perform multiple operations in sequence, then return the result of the last one
 # [MARK operation...] - POP_MARK result 
 # SetItem(object, key, value): Implement object[key] = value
