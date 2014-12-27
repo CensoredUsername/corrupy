@@ -20,7 +20,7 @@ __all__ = [
     "fake_package", "remove_fake_package",
     "FakeModule", "FakePackage", "FakePackageLoader",
     "FakeClassType", "FakeClassFactory",
-    "FakeUnpickler", "SafeUnpickler"
+    "FakeUnpicklingError", "FakeUnpickler", "SafeUnpickler"
 ]
 
 # the main API
@@ -109,10 +109,10 @@ def remove_fake_package(name):
     # Get the package entry via its entry in sys.modules
     package = sys.modules.get(name, None)
     if package is None:
-        raise Exception("No fake package with the name {0} found".format(name))
+        raise ValueError("No fake package with the name {0} found".format(name))
 
     if not isinstance(package, FakePackage):
-        raise Exception("The module {0} is not a fake package".format(name))
+        raise ValueError("The module {0} is not a fake package".format(name))
 
     # Attempt to remove the loader from sys.meta_path
 
@@ -128,6 +128,9 @@ def remove_fake_package(name):
     # tree structure has been broken up. 
 
 # Fake class implementation
+
+class FakeUnpicklingError(pickle.UnpicklingError):
+    pass
 
 class FakeClassType(type):
     """
@@ -167,7 +170,7 @@ class FakeClassType(type):
 def _strict_new(cls, *args, **kwargs):
     self = cls.__bases__[0].__new__(cls)
     if args:
-        raise ValueError("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
+        raise FakeUnpicklingError("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
     return self
 
 def _warning_new(cls, *args, **kwargs):
@@ -191,7 +194,7 @@ def _strict_setstate(self, state):
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
-            raise ValueError("{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state))
+            raise FakeUnpicklingError("{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state))
         else:
             self.__dict__.update(state)
         
