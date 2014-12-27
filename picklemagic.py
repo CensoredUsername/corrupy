@@ -15,6 +15,14 @@ if PY3:
 else:
     from cStringIO import StringIO
 
+__all__ = [
+    "load", "loads", "safe_load", "safe_loads",
+    "fake_package", "remove_fake_package",
+    "FakeModule", "FakePackage", "FakePackageLoader",
+    "FakeClassType", "FakeClassFactory",
+    "FakeUnpickler", "SafeUnpickler"
+]
+
 # the main API
 
 def load(file, class_factory=None,

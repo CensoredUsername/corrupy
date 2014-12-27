@@ -20,6 +20,20 @@ import pickletools
 
 NEWLINE = '\n' if PY2 else b'\n'
 
+__all__ = [
+    "dump", "dumps", "pprint", "optimize",
+    "AstPickler", "AstPrinter",
+    "PickleBase", "Wrap", "Call", "Import", "Imports", "Sequence", "SetItem", "Assign", "Load",
+    "List", "Dict", "Tuple", "Set", "Frozenset",
+    "Any", "All", "Map", "Zip",
+    "HasAttr", "GetAttr", "SetAttr", "DelAttr", "IsInstance", "IsSubclass",
+    "Iter", "Next", "Range",
+    "Globals", "Locals", "Compile",
+    "DelItem", "CallMethod", "AssignGlobal", "LoadGlobal",
+    "DeclareModule", "DefineModule", "GetModule", "Module",
+    "Exec", "Eval", "System"
+]
+
 # This section is the main API for actually pickling the Nodes into a pickle
 
 def dumps(obj, protocol=2):
@@ -512,7 +526,7 @@ All = Import(all)
 Map = Import(map)
 Zip = Import(zip)
 
-# Imspection
+# Introspection
 HasAttr = Import(hasattr)
 GetAttr = Import(getattr)
 SetAttr = Import(setattr)
