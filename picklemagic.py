@@ -371,7 +371,10 @@ class FakeModule(types.ModuleType):
     alphanumeric string.
 
     On initialization the module is added to sys.modules so it can be
-    imported properly.
+    imported properly. Further if *name* is a submodule and if its parent
+    does not exist, it will automatically create a parent :class:`FakeModule`.
+    This operates recursively until the parent is a top-level module or
+    when the parent is an existing module.
 
     If any fake submodules are removed from this module they will
     automatically be removed from :data:`sys.modules`.
@@ -397,6 +400,15 @@ class FakeModule(types.ModuleType):
     def __init__(self, name):
         super(FakeModule, self).__init__(name)
         sys.modules[name] = self
+
+        if "." in name:
+            parent_name, child_name = name.rsplit(".", 1)
+
+            try:
+                parent = __import__(parent_name)
+            except:
+                parent = FakeModule(parent_name)
+            setattr(parent, child_name, self)
 
     def __repr__(self):
         return "<module '{0}' (fake)>".format(self.__name__)
