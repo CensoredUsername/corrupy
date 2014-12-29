@@ -28,11 +28,22 @@ __all__ = [
 def load(file, class_factory=None,
          encoding="bytes", errors="strict"):
     """
-    Return the datastructure described in `file` making up any
-    unimportable modules using `class_factory`.
+    Read a pickled object representation from the open binary :term:`file object` *file*
+    and return the reconstitutded object hierarchy specified therein, generating
+    any missing class definitions at runtime. This is equivalent to
+    ``FakeUnpickler(file).load()``.
 
-    `encoding` and `errors` control how pickle protocol 2 and below
-    bytestrings are handled in python 3
+    The optional keyword arguments are *class_factory*, *encoding* and *errors*.
+    *class_factory* can be used to control how the missing class definitions are
+    created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be used.
+
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    to indicate how the unpickler should deal with pickle streams generated in python
+    2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
+    load them as bytes objects, otherwise it will attempt to decode them into unicode
+    using the given *encoding* and *errors* arguments.
+
+    This function should only be used to unpickle trusted data.
     """
     return FakeUnpickler(file, class_factory,
                          encoding=encoding, errors=errors).load()
@@ -40,54 +51,68 @@ def load(file, class_factory=None,
 def loads(string, class_factory=None,
           encoding="bytes", errors="strict"):
     """
-    Return the datastructure described in `string` making up any
-    unimportable modules using `class_factory`.
-
-    `encoding` and `errors` control how pickle protocol 2 and below
-    bytestrings are handled in python 3
+    Similar to :func:`load`, but takes an 8-bit string (bytes in Python 3, str in Python 2)
+    as its first argument instead of a binary :term:`file object`.
     """
     return FakeUnpickler(StringIO(string), class_factory,
                          encoding=encoding, errors=errors).load()
 
-def safe_load(file, class_factory=None, safe_modules=(),
+def safe_load(file, class_factory=None, safe_modules=(), use_copyreg=False,
               encoding="bytes", errors="strict"):
     """
-    Return the datastructure described in `file` exchanging any
-    references to class definitions by FakeClass instances from 
-    `class_factory` unless the module they should be imported from
-    is mentioned as a string in `safe_modules`.
+    Read a pickled object representation from the open binary :term:`file object` *file*
+    and return the reconstitutded object hierarchy specified therein, substituting any
+    class definitions by fake classes, ensuring safety in the unpickling process.
+    This is equivalent to ``SafeUnpickler(file).load()``.
 
-    `encoding` and `errors` control how pickle protocol 2 and below
-    bytestrings are handled in python 3
+    The optional keyword arguments are *class_factory*, *safe_modules*, *use_copyreg*, 
+    *encoding* and *errors*. *class_factory* can be used to control how the missing class
+    definitions are created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be
+    used. *safe_modules* can be set to a set of strings of module names, which will be
+    regarded as safe by the unpickling process, meaning that it will import objects
+    from that module instead of generating fake classes (this does not apply to objects
+    in submodules). *use_copyreg* is a boolean value indicating if it's allowed to 
+    use extensions from the pickle extension registry (documented in the :mod:`copyreg`
+    module).
+
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    to indicate how the unpickler should deal with pickle streams generated in python
+    2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
+    load them as bytes objects, otherwise it will attempt to decode them into unicode
+    using the given *encoding* and *errors* arguments.
+
+    This function can be used to unpickle untrusted data safely with the default
+    class_factory when *safe_modules* is empty and *use_copyreg* is False.
     """
-    return SafeUnpickler(file, class_factory, safe_modules,
+    return SafeUnpickler(file, class_factory, safe_modules, use_copyreg,
                          encoding=encoding, errors=errors).load()
 
-def safe_loads(string, class_factory=None, safe_modules=(),
+def safe_loads(string, class_factory=None, safe_modules=(), use_copyreg=False,
                encoding="bytes", errors="strict"):
     """
-    Return the datastructure described in `string` exchanging any
-    references to class definitions by FakeClass instances from
-    `class_factory` unless the module they should be imported from
-    is mentioned as a string in `safe_modules`.
-
-    `encoding` and `errors` control how pickle protocol 2 and below
-    bytestrings are handled in python 3
+    Similar to :func:`safe_load`, but takes an 8-bit string (bytes in Python 3, str in Python 2)
+    as its first argument instead of a binary :term:`file object`.
     """
-    return SafeUnpickler(StringIO(string), class_factory, safe_modules,
+    return SafeUnpickler(StringIO(string), class_factory, safe_modules, use_copyreg,
                          encoding=encoding, errors=errors).load()
 
 def fake_package(name):
     """
-    Mounts a fake package tree with the name `name`. This means that 
-    any request to import a module with this name or a submodule of it
-    will result in importing a FakePackage which can be used to compare
-    against FakeModules and FakeClasses created by loads and safe_loads.
+    Mounts a fake package tree with the name *name*. This causes any attempt to import
+    module *name*, attributes of the module or submodules will return a :class:`FakePackage`
+    instance which implements the same behaviour. These :class:`FakePackage` instances compare
+    properly with :class:`FakeClassType` instances allowing you to code using FakePackages as
+    if the modules and their attributes actually existed.
 
-    If a fake package with that name was already created, this function
-    will not create another one.
+    This is implemented by creating a :class:`FakePackageLoader` instance with root *name*
+    and inserting it in the first spot in :data:`sys.meta_path`. This ensures that importing the
+    module and submodules will work properly. Further the :class:`FakePackage` instances take
+    care of generating submodules as attributes on request.
 
-    This returns the created FakePackage
+    If a fake package tree with the same *name* is already registered, no new fake package
+    tree will be mounted.
+
+    This returns the :class:`FakePackage` instance *name*.
     """
     if name in sys.modules and isinstance(sys.modules[name], FakePackage):
         return sys.modules[name]
@@ -98,12 +123,17 @@ def fake_package(name):
 
 def remove_fake_package(name):
     """
-    Removes a fake package tree. This is implemented by first removing any
-    FakePackageLoaders for `name` from sys.path, finding the top-level
-    FakePackage created by fake_package, and then walking the tree of created
-    FakePackages, removing their references to each other and removing them 
-    from sys.modules. This ensures that any FakePackages not directly referenced
-    by user code will be destroyed
+    Removes the fake package tree mounted at *name*. 
+
+    This works by first looking for any FakePackageLoaders in :data:`sys.path`
+    with their root set to *name* and removing them from sys.path. Next it will
+    find the top-level :class:`FakePackage` instance *name* and from this point
+    traverse the tree of created submodules, removing them from :data:`sys.path`
+    and removing their attributes. After this the modules are not registered
+    anymore and if they are not referenced from user code anymore they will be
+    garbage collected.
+
+    If no fake package tree *name* exists a :exc:`ValueError` will be raised.
     """
 
     # Get the package entry via its entry in sys.modules
@@ -129,17 +159,26 @@ def remove_fake_package(name):
 
 # Fake class implementation
 
-class FakeUnpicklingError(pickle.UnpicklingError):
-    pass
-
 class FakeClassType(type):
     """
-    As the metaclass for FakeClasses this class defines a set of equality methods.
+    The metaclass used to create fake classes. To support comparisons between
+    fake classes and :class:`FakeModule` instances custom behaviour is defined
+    here which follows this logic:
 
-    By default classes equality commparison is limited by id(self) == id(other)
-    For fakeclasses however it's necessary that they compare positively with
-    Other FakeClasses, actual classes with the same __module__ and __name__
-    #nd modules/FakeModules with a matching __name__.
+    If the other object does not have ``other.__name__`` set, they are not equal.
+
+    Else if it does not have ``other.__module__`` set, they are equal if
+    ``self.__module__ + "." + self.__name__ == other.__name__``.
+
+    Else, they are equal if 
+    ``self.__module__ == other.__module__ and self.__name__ == other.__name__``
+
+    Using this behaviour, ``==``, ``!=``, ``hash()``, ``isinstance()`` and ``issubclass()``
+    are implemented allowing comparison between :class:`FakeClassType` instances
+    and :class:`FakeModule` instances to succeed if they are pretending to bein the same
+    place in the python module hierarchy.
+
+    This is a subclass of :class:`type`
     """
 
     def __eq__(self, other):
@@ -236,30 +275,46 @@ def _ignore_setstate(self, state):
 
 class FakeClassFactory(object):
     """
-    A factory which instantiates FakeClasses which inherit from given bases 
-    with given methods and attributes
+    Factory of fake classses. It will create fake class definitions on demand
+    based on the passed arguments.
     """
 
     def __init__(self, special_cases, errors='strict', fake_metaclass=FakeClassType, default_bases=(object,)):
         """
-        `special_cases` should be a dict with a mapping of name to a tuple of a tuple of 
-        classes the special case should inherit from and a dict of attribute name to attribute
-        value. 
+        *special_cases* should be a (possibly empty) dictionary which can be used to indicate
+        that certain classes need special methods, attributes or bases. 
 
-        e.g. special_cases = {"foo.bar": ((object, ), {"__str__": lambda self: "baz"})}
+        :class:`FakeClassFactory` provides two methods by default since they can be called
+        during the unpickling process, :meth:`__new__` and :meth:`__setstate__` since these can
+        be called during the unpickling process. Their functionality depends on the given
+        *errors* value.
 
-        To mimic another class would require the equivalent of this:
-        special_cases = {class.__module__ + "." + class.__name__: (class.__bases__, class.__dict__)}
+        If *errors* is set to "strict", a :exc:`FakeUnpicklingError` will be raised if special
+        arguments were passed into the methods during unpickling. Else if *errors* is set to "warning"
+        a warning detailing the arguments will be printed and the arguments will be stored inside
+        a member of the object (:attr:`_setstate_args` or :attr:`_new_args`). Finally if *errors* is set
+        to "ignore", any unknown arguments will be ignored. Attempting to set *errors* to any
+        other value will cause a :exc:`ValueError` to be raised.
 
-        `errors` determines how errors around object instatiation from the pickle will be 
-        handled by the default __new__ and __setstate__ methods used by FakeClasses.
+        The optional argument *fake_metaclass* determines the type of the created fake class.
+        This is by default :class:`FakeClassType`, but can be altered to control the behaviour
+        of the generated fake class definitions. Further, *default_bases* should be a tuple of
+        the classes from which the created fake classes inherit. By default this is ``(object,)``
+        but if old-style classes are desired in Python 2, it can be set to an empty tuple.
 
-        There are three possible cases. 'strict', the default, will raise a ValueError
-        when the default methods do not know how to handle the given arguments. 'warning'
-        will print a warning and assign the given arguments to temporary variables. 'ignore'
-        will simply ignore the arguments.
+        both the default methods and default bases can be overridden using *special_cases*,
+        which should follow this syntax: ``special_cases = {"module.name": (bases, methods)``
+        in which bases is a tuple of classes to inherit from and methods is a dictionary of
+        attribute name to value. In case value is a function, it will be used as a bound method.
 
-        `fake_meta_class` is the metaclass used to create the FakeClass. It should inherit from type
+        As an example, we can define the fake class generated for definition bar in module foo,
+        which has a :meth:`__str__` method which returns ``"baz"``:
+
+        ``special_cases = {"foo.bar": ((object, ), {"__str__": (lambda self: "baz")})}``
+
+        Finally it can be noted that the equivalent of another class can be generated using:
+
+        ``special_cases = {cls.__module__ + "." + cls.__name__: (cls.__bases__, cls.__dict__)}``
         """
         self.special_cases = special_cases
         self.metaclass = fake_metaclass
@@ -278,9 +333,13 @@ class FakeClassFactory(object):
 
     def __call__(self, name, module):
         """
-        Constructs a class with the name `name` and __module__ set to module
-        with the bases, attributes and metaclass set to the parameters given
-        to the factory
+        Create a fake class definition.
+
+        This will create a fake class definition for a class *name* in *module*. This class
+        will inherit from *default_bases* and have the default methods specified by *errors*
+        unless ``module + "." + name`` is found in *special_cases*.
+
+        Created class definitions are cached per factory instance.
         """
         # Check if we've got this class cached
         klass = self.class_cache.get((module, name), None)
@@ -306,11 +365,34 @@ class FakeClassFactory(object):
 
 class FakeModule(types.ModuleType):
     """
-    A dynamically created fake module object. This object
-    will compare equal to anything with the same __name__ (modules)
-    or the same __module__ + "." + __name__ (classes) so it can
-    be compared with fake classes, allowing you to code as if the classes
-    Already existed before they were created during unpickling
+    An object which pretends to be a module.
+
+    *name* is the name of the module and should be a ``"."`` separated
+    alphanumeric string.
+
+    On initialization the module is added to sys.modules so it can be
+    imported properly.
+
+    If any fake submodules are removed from this module they will
+    automatically be removed from :data:`sys.modules`.
+
+    Just as :class:`FakeClassType`, it supports comparison with
+    :class:`FakeClassType` instances, using the following logic:
+
+    If the object does not have ``other.__name__`` set, they are not equal.
+
+    Else if the other object does not have ``other.__module__`` set, they are equal if:
+    ``self.__name__ == other.__name__``
+
+    Else, they are equal if:
+    ``self.__name__ == other.__module__ + "." + other.__name__``
+
+    Using this behaviour, ``==``, ``!=``, ``hash()``, ``isinstance()`` and ``issubclass()``
+    are implemented allowing comparison between :class:`FakeClassType` instances
+    and :class:`FakeModule` instances to succeed if they are pretending to bein the same
+    place in the python module hierarchy.
+
+    It inherits from :class:`types.ModuleType`.
     """
     def __init__(self, name):
         super(FakeModule, self).__init__(name)
@@ -337,6 +419,10 @@ class FakeModule(types.ModuleType):
         del self.__dict__[name]
 
     def _remove(self):
+        """
+        Removes this module from :data:`sys.modules` and calls :meth:`_remove` on any
+        sub-FakeModules.
+        """
         for i in self.__dict__.keys()[:]:
             if isinstance(self.__dict__[i], FakeModule):
                 self.__dict__[i]._remove()
@@ -368,10 +454,18 @@ class FakeModule(types.ModuleType):
 
 class FakePackage(FakeModule):
     """
-    A FakeModule which presents FakePackages at any attribute, allowing
-    you to request any object in this module or any submodule.
+    A :class:`FakeModule` subclass which lazily creates :class:`FakePackage`
+    instances on its attributes when they're requested. 
+
+    This ensures that any attribute of this module is a valid FakeModule
+    which can be used to compare against fake classes.
     """
     __path__ = []
+
+    def __call__(self, *args, **kwargs):
+        # This mainly exists to print a nicer error message when
+        # someone tries to call a FakePackage instance
+        raise TypeError("'{0}' FakePackage object is not callable".format(self.__name__))
 
     def __getattr__(self, name):
         modname = self.__name__ + "." + name
@@ -387,9 +481,14 @@ class FakePackage(FakeModule):
 
 class FakePackageLoader(object):
     """
-    A loader for FakePackage modules. This is mounted at a certain root, 
-    and from that point on any module imported which is that root or
-    would be a submodule from that root will be a FakePackage
+    A :term:`loader` of :class:`FakePackage` modules. When added to
+    :data:`sys.meta_path` it will ensure that any attempt to import
+    module *root* or its submodules results in a FakePackage.
+
+    Together with the attribute creation from :class:`FakePackage`
+    this ensures that any attempt to get a submodule from module *root*
+    results in a FakePackage, creating the illusion that *root* is an
+    actual package tree.
     """
     def __init__(self, root):
         self.root = root
@@ -404,15 +503,35 @@ class FakePackageLoader(object):
         return FakePackage(fullname)
 
 # Fake unpickler implementation
+
+class FakeUnpicklingError(pickle.UnpicklingError):
+    """
+    Error raised when there is not enough information to perform the fake
+    unpickling process completely. It inherits from :exc:`pickle.UnpicklingError`.
+    """
+    pass
+
 class FakeUnpickler(pickle.Unpickler if PY2 else pickle._Unpickler):
     """
-    This unpickler behaves like a normal unpickler as long as it can import
-    the modules and classes that are requested in the pickle. If however it 
-    encounters an unknown module or class it will insert FakeModules and 
-    FakeClasses where necessary.
+    A forgiving unpickler. On uncountering references to class definitions
+    in the pickle stream which it cannot locate, it will create fake classes
+    and if necessary fake modules to house them in. Since it still allows access
+    to all modules and builtins, it should only be used to unpickle trusted data.
 
-    This means that this pickle is as close to the original data as possible,
-    but it still suffers from the dangers of unpickling untrusted data.
+    *file* is the :term:`binary file` to unserialize.
+
+    The optional keyword arguments are *class_factory*, *encoding* and *errors*.
+    *class_factory* can be used to control how the missing class definitions are
+    created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be used.
+
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    to indicate how the unpickler should deal with pickle streams generated in python
+    2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
+    load them as bytes objects, otherwise it will attempt to decode them into unicode
+    using the given *encoding* and *errors* arguments.
+
+    It inherits from :class:`pickle.Unpickler`. (In Python 3 this is actually
+    ``pickle._Unpickler``)
     """
     if PY2:
         def __init__(self, file, class_factory=None,
@@ -445,26 +564,45 @@ class FakeUnpickler(pickle.Unpickler if PY2 else pickle._Unpickler):
 
 class SafeUnpickler(FakeUnpickler):
     """
-    This unpickler does not attempt to import any module or class definitions unless
-    they're marked as safe by entering their names as a set of strings into `safe_modules`.
-    It will attempt to unpickle the given file as close to the original datastructure
-    as possible, replacing any pickled objects by FakeClasses.
+    A safe unpickler. It will create fake classes for any references to class
+    definitions in the pickle stream. Further it can block access to the extension
+    registry making this unpickler safe to use on untrusted data.
 
-    This means that this unpickler does not suffer from the unpickling untrusted
-    data vulnerabilities and that it can be used to inspect pickles if they
-    contain such vulnerabilities.
+    *file* is the :term:`binary file` to unserialize.
 
-    It should be noted though that if a module is marked as safe but an attribute
-    in that module is not found, it will not insert a FakeClass there, instead it will
-    raise an UnpicklingError
+    The optional keyword arguments are *class_factory*, *safe_modules*, *use_copyreg*, 
+    *encoding* and *errors*. *class_factory* can be used to control how the missing class
+    definitions are created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be
+    used. *safe_modules* can be set to a set of strings of module names, which will be
+    regarded as safe by the unpickling process, meaning that it will import objects
+    from that module instead of generating fake classes (this does not apply to objects
+    in submodules). *use_copyreg* is a boolean value indicating if it's allowed to 
+    use extensions from the pickle extension registry (documented in the :mod:`copyreg`
+    module).
+
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    to indicate how the unpickler should deal with pickle streams generated in python
+    2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
+    load them as bytes objects, otherwise it will attempt to decode them into unicode
+    using the given *encoding* and *errors* arguments.
+
+    This function can be used to unpickle untrusted data safely with the default
+    class_factory when *safe_modules* is empty and *use_copyreg* is False.
+    It inherits from :class:`pickle.Unpickler`. (In Python 3 this is actually
+    ``pickle._Unpickler``)
+    
+    It should be noted though that when the unpickler tries to get a nonexistent
+    attribute of a safe module, an :exc:`AttributeError` will be raised.
+
+    This inherits from :class:`FakeUnpickler`
     """
-
-    def __init__(self, file, class_factory=None, safe_modules=(),
+    def __init__(self, file, class_factory=None, safe_modules=(), use_copyreg=False,
                  encoding="bytes", errors="strict"):
         FakeUnpickler.__init__(self, file, class_factory,
                                encoding=encoding, errors=errors)
         # A set of modules which are safe to load
         self.safe_modules = set(safe_modules)
+        self.use_copyreg = use_copyreg
 
     def find_class(self, module, name):
         if module in self.safe_modules:
@@ -475,3 +613,9 @@ class SafeUnpickler(FakeUnpickler):
 
         else:
             return self.class_factory(name, module)
+
+    def get_extension(self, code):
+        if self.use_copyreg:
+            return FakeUnpickler.get_extension(self, code)
+        else:
+            return self.class_factory("extension_code_{0}".format(code), "copyreg")
