@@ -561,21 +561,29 @@ def CallMethod(obj, attr, *args):
 
 # And ways to easily interact with the global scope (allowing us to interact with eval and exec)
 
-def AssignGlobal(varname, value, retval=True):
+def AssignGlobal(varname, value, retval=True, module=None):
     """
     Assigns `value` to `varname` in the global namespace (to interact with exec and eval blocks)
     This is implemented as globals()[varname] = value
-    THis returns `value` if retval is True, else it returns globals()
+    This returns `value` if retval is True, else it returns globals()
     """
-    val = SetItem(Globals(), varname, value)
+    if module is None:
+        namespace = Globals()
+    else:
+        namespace = GetAttr(GetModule(module), "__dict__")
+    val = SetItem(namespace, varname, value)
     return val[varname] if retval else val
 
-def LoadGlobal(varname):
+def LoadGlobal(varname, module=None):
     """
     Loads `varname` from the global namespace
     This is implemented as globals()[varname]
     """
-    return Globals()[varname]
+    if module is None:
+        namespace = Globals()
+    else:
+        namespace = GetAttr(GetModule(module), "__dict__")
+    return namespace[varname]
 
 # We can also interact with modules
 
