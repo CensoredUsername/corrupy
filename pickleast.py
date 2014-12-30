@@ -607,8 +607,6 @@ if PY2:
         This 'defines' a module by executing a block of code in the namespace
         Of said module. It will strip empty and comment-only lines before packing the code
         """
-        code = '\n'.join(line for line in code.splitlines() if line.split("#")[0].strip())
-
         return Sequence(
             AssignGlobal("_c", code, False),
             AssignGlobal("_m", GetModule(name), False),
@@ -624,8 +622,6 @@ else:
         This 'defines' a module by executing a block of code in the namespace
         Of said module. It will strip empty and comment-only lines before packing the code
         """
-        code = '\n'.join(line for line in code.splitlines() if line.split("#")[0].strip())
-
         return Imports("builtins", "exec")(code, GetAttr(GetModule(name), "__dict__"))
 
 def GetModule(name):
