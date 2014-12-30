@@ -60,37 +60,37 @@ created datastructures when the fake modules and classes are only created at
 unpickling time. Therefore it is made possible for the user to create the necessary
 fake modules beforehand, either by creating :class:`FakeModule` instances directly
 or by using :func:`fake_package`. This function allows the user to define that
-any modules in the given package exist, which works recursively, for example:
+any modules in the given package exist, which works recursively, for example::
+   
+   import picklemagic
+   picklemagic.fake_package("foo")
 
-``import picklemagic
-picklemagic.fake_package("foo")
+   import foo.bar.baz
+   print(foo.bar.baz)
 
-import foo.bar.baz
-print(foo.bar.baz)
-
->>> <module 'foo.bar.baz' (fake)>``
+   >>> <module 'foo.bar.baz' (fake)>
 
 These can then be used to code with due to the special comparison behaviour of
 fake modules and classes. This behaviour works as follows: A fake class is equal
 to a fake module if it's qualified name matches the qualified name of the fake
 module. This means that a fake class which says it has name ``bar`` in module ``foo``
 compares equal to a fake module which identifies as ``foo.bar`` (this behaviour extends to hashing and isinstance/issubclass checking). This can then be
-used as follows:
+used as follows::
+   
+   import picklemagic
+   picklemagic.fake_package("foo")
 
-``import picklemagic
-picklemagic.fake_package("foo")
+   import foo
 
-import foo
+   def is_foo_bar(obj):
+       if isinstance(obj, foo.bar):
+           print("yes")
 
-def is_foo_bar(obj):
-    if isinstance(obj, foo.bar):
-        print("yes")
+   result = picklemagic.safe_loads(b"cfoo\nbar\n(tR.")
+   # This pickle results in a foo.bar instance
 
-result = picklemagic.safe_loads(b"cfoo\nbar\n(tR.")
-# This pickle results in a foo.bar instance
-
-is_foo_bar(result)
->>> yes``
+   is_foo_bar(result)
+   >>> yes
 
 This means that you don't have to worry about definitions not existing in certain
 pickles. You can call :func:`fake_package` and then just code as if everything in
