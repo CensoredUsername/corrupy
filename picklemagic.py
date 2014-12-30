@@ -220,7 +220,10 @@ def _warning_new(cls, *args, **kwargs):
     return self
 
 def _ignore_new(cls, *args, **kwargs):
-    return cls.__bases__[0].__new__(cls)
+    self = cls.__bases__[0].__new__(cls)
+    if args:
+        self._new_args = args
+    return self
 
 def _strict_setstate(self, state):
     slotstate = None
@@ -267,8 +270,12 @@ def _ignore_setstate(self, state):
         (state[1] is None or isinstance(state[1], dict))):
         state, slotstate = state
     
-    if state and isinstance(state, dict):
-        self.__dict__.update(state)
+    if state:
+        # Don't have to check for slotstate here since it's either None or a dict
+        if not isinstance(state, dict):
+            self._setstate_args = state 
+        else:
+            self.__dict__.update(state)
         
     if slotstate:
         self.__dict__.update(slotstate)
@@ -289,12 +296,13 @@ class FakeClassFactory(object):
         be called during the unpickling process. Their functionality depends on the given
         *errors* value.
 
-        If *errors* is set to "strict", a :exc:`FakeUnpicklingError` will be raised if special
-        arguments were passed into the methods during unpickling. Else if *errors* is set to "warning"
+        If *errors* is set to ``"strict"``, a :exc:`FakeUnpicklingError` will be raised if special
+        arguments were passed into the methods during unpickling. Else if *errors* is set to ``"warning"``
         a warning detailing the arguments will be printed and the arguments will be stored inside
         a member of the object (:attr:`_setstate_args` or :attr:`_new_args`). Finally if *errors* is set
-        to "ignore", any unknown arguments will be ignored. Attempting to set *errors* to any
-        other value will cause a :exc:`ValueError` to be raised.
+        to ``"ignore"``, any unknown arguments will be stored inside a member of the object but no
+        warning will be printed. Attempting to set *errors* to any other value will cause a
+        :exc:`ValueError` to be raised.
 
         The optional argument *fake_metaclass* determines the type of the created fake class.
         This is by default :class:`FakeClassType`, but can be altered to control the behaviour
@@ -435,7 +443,7 @@ class FakeModule(types.ModuleType):
         Removes this module from :data:`sys.modules` and calls :meth:`_remove` on any
         sub-FakeModules.
         """
-        for i in self.__dict__.keys()[:]:
+        for i in tuple(self.__dict__.keys()):
             if isinstance(self.__dict__[i], FakeModule):
                 self.__dict__[i]._remove()
                 del self.__dict__[i]
