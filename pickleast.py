@@ -521,6 +521,11 @@ Set = Import(set)
 Tuple = Import(tuple)
 Frozenset = Import(frozenset)
 
+# Other types
+Str = Import(str)
+Int = Import(int)
+Bool = Import(bool)
+
 # Functional programming
 Any = Import(any)
 All = Import(all)
@@ -559,6 +564,15 @@ def CallMethod(obj, attr, *args):
     A convenience function for calling methods.
     """
     return GetAttr(obj, attr)(*args)
+
+# And try to support other useful constructs
+
+def Ternary(conditional, true_value, false_value):
+    """
+    A simple ternary statement. Due to the limitations of pickling both branches will be executed
+    But it is possible to have a conditional final result.
+    """
+    return Wrap((false_value, true_value))[Bool(conditional)]
 
 # And ways to easily interact with the global scope (allowing us to interact with eval and exec)
 
