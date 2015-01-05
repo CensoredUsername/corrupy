@@ -3,6 +3,7 @@
 # This module provides tools for constructing special pickles
 
 import sys
+import ast
 
 PY3 = sys.version_info >= (3, 0)
 PY2 = not PY3
@@ -607,22 +608,16 @@ if PY2:
         This 'defines' a module by executing a block of code in the namespace
         Of said module. It will strip empty and comment-only lines before packing the code
         """
-        return Sequence(
-            AssignGlobal("_c", code, False),
-            AssignGlobal("_m", GetModule(name), False),
-            Import(types.FunctionType)(
-                Compile("exec _c in _m.__dict__", "<{0}>".format(name), "exec"),
-                Globals(),
-                'exe'
-            )()
-        )
+        return Import(eval)(
+                   Compile(code, "<{0}>".format(name), "exec"), 
+                   Imports(name, "__dict__"))
 else:
     def DefineModule(name, code):
         """
         This 'defines' a module by executing a block of code in the namespace
         Of said module. It will strip empty and comment-only lines before packing the code
         """
-        return Imports("builtins", "exec")(code, GetAttr(GetModule(name), "__dict__"))
+        return Imports("builtins", "exec")(code, Imports(name, "__dict__"))
 
 def GetModule(name):
     """
@@ -658,21 +653,11 @@ if PY2:
         This node executes `string` in the global namespace (this will usually be the
         pickle module namespace)
 
-        This is implemented by exec'ing the code within a dynamically created anonymous function
+        This is implemented as eval(compile(code, "<pickle>", "exec"), globals())
 
         It returns None
         """
-        return Sequence(
-            AssignGlobal("_c", string, False),
-            Import(types.FunctionType)(
-                Compile(
-                    "exec _c in globals()", 
-                    "<pickle>", 
-                    "exec"), 
-                Globals(),
-                'exe'
-            )()
-        )
+        return Eval(Compile(string, "<pickle>", "exec"))
 else:
     def Exec(string):
         """
