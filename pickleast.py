@@ -4,7 +4,6 @@
 
 import sys
 import ast
-import __builtin__
 
 PY3 = sys.version_info >= (3, 0)
 PY2 = not PY3
@@ -836,19 +835,23 @@ class TransPickler(ast.NodeVisitor):
 
 def ExecAst(string):
     node = ast.parse(string)
-    node = Deduplicator().visit(node)
-    node = PyAstCompiler().visit(node)
+    node = PyAstCompiler().process(node)
+    node = Import(ast.fix_missing_locations)(node)
     return Eval(Compile(node, "<pickle>", "exec"))
 
-class Deduplicator(ast.NodeTransformer):
+class PyAstCompiler(ast.NodeTransformer):
     def __init__(self):
         #mapping of (class, fields) to node
         self.nodes = {}
 
     # a node is equal to another one if their id matches, or 
     # if all(getattr(other, name)==getattr(self, name) for name in self._fields)
+    def process(self, node):
+        node = self.visit(node)
+        return self.pickle(node)
 
-    def visit(self, node):
+    def generic_visit(self, node):
+        # Recurse
         for name in node._fields:
             attr = getattr(node, name)
             if isinstance(attr, list):
@@ -856,21 +859,29 @@ class Deduplicator(ast.NodeTransformer):
             elif isinstance(attr, ast.AST):
                 setattr(node, name, self.visit(attr))
 
-        fields = [getattr(node, i) for i in node._fields]
-        fields = [tuple(i) if isinstance(i, list) else i for i in fields]
-        original = self.nodes.get((type(node), tuple(fields)), None)
+        # Check uniqueness
+        fields = tuple(tuple(i) if isinstance(i, list) else i 
+                       for i in 
+                       (getattr(node, name) for name in node._fields))
+        original = self.nodes.get((type(node), fields), None)
         if original is not None:
             return original
-        self.nodes[(type(node), tuple(fields))] = node
+
+        # This is an unknown node, generate a new call object
+        self.nodes[(type(node), fields)] = node
         return node
 
-class PyAstCompiler(ast.NodeTransformer):
-    def visit(self, node):
+    def pickle(self, node):
+        # Be more efficient while pickling the ast by just calling the constructors
+        # Instead of using SetAttributes
+
+        # Recurse
         for name in node._fields:
             attr = getattr(node, name)
             if isinstance(attr, list):
-                setattr(node, name, [self.visit(i) if isinstance(i, ast.AST) else i for i in attr])
+                setattr(node, name, [self.pickle(i) if isinstance(i, ast.AST) else i for i in attr])
             elif isinstance(attr, ast.AST):
-                setattr(node, name, self.visit(attr))
+                setattr(node, name, self.pickle(attr))
 
         return Call(type(node), *[getattr(node, i) for i in node._fields], cache_id=id(node))
+
