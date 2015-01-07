@@ -4,6 +4,7 @@
 
 import sys
 import ast
+import __builtin__
 
 PY3 = sys.version_info >= (3, 0)
 PY2 = not PY3
@@ -30,7 +31,7 @@ __all__ = [
     "HasAttr", "GetAttr", "SetAttr", "DelAttr", "IsInstance", "IsSubclass",
     "Iter", "Next", "Range",
     "Globals", "Locals", "Compile",
-    "DelItem", "CallMethod", "AssignGlobal", "LoadGlobal",
+    "DelItem", "CallMethod", "Ternary", "AssignGlobal", "LoadGlobal",
     "DeclareModule", "DefineModule", "GetModule", "Module",
     "Exec", "Eval", "System"
 ]
@@ -267,7 +268,7 @@ class Wrap(PickleBase):
 
 # Call(object, *args): Calling an object with a set of arguments.
 # [object (args)] - REDUCE
-# Call(object, **kwargs): Setting attributes of an object (unless it has __setstate__ implemented)
+# SetAttributes(object, **kwargs): Setting attributes of an object (unless it has __setstate__ implemented)
 # [object (None, kwargs)] - BUILD
 # Import[s](module.name): Loading a top-level attribute of a module
 # [] - GLOBAL module \n name \n or ["module" "name"] STACK_GLOBAL (pickle protocol 4, python 3.4)
@@ -282,55 +283,75 @@ class Wrap(PickleBase):
 
 class Call(PickleBase):
     """
-    This operation represents either calling an object on the pickle VM stack or 
-    Calling __setattr__ or __dict__.update on it depending on what arguments are given.
+    This operation represents calling an object on the pickle VM stack 
 
-    If this is called with an object and a set of positional arguments (or no arguments),
+    This will call object and a set of positional arguments (or no arguments),
     the object will be called with these arguments at unpickling time.
-
-    If it is however called with keyword arguments, it will call __dict__.update with these
-    keyword arguments and return the object.
     """
     def __init__(self, callable, *args, **kwargs):
         self.callable = callable
-        if args and kwargs:
-            raise ValueError("Call() cannot take both initialization arguments and attribute setting keyword arguments")
         self.args = args
-        self.kwargs = kwargs
+        self.cache_id = kwargs.pop("cache_id", None)
+        if kwargs:
+            raise ValueError("Unknown keyword argument {0}".format(kwargs.keys()[0]))
 
     def _serialize(self, pickler):
-            if self.kwargs:
-                pickler.save(self.callable)
-                pickler.save((None, self.kwargs))
-                pickler.write(pickle.BUILD)
-            else:
-                pickler.save(self.callable)
-                pickler.save(tuple(self.args))
-                pickler.write(pickle.REDUCE)
+        if self.cache_id is not None:
+            entry = pickler.memo.get(self.cache_id, None)
+            if entry is not None:
+                pickler.write(pickler.get(entry[0]))
+                return
+
+        pickler.save(self.callable)
+        pickler.save(tuple(self.args))
+        pickler.write(pickle.REDUCE)
+
+        if self.cache_id is not None:
+            memo_len = len(pickler.memo)
+            pickler.write(pickler.put(memo_len))
+            pickler.memo[self.cache_id] = memo_len, self
 
     def _print(self, printer):
         printer.p("Call(")
-        if self.kwargs:
+        if len(self.args):
             printer.ind(1)
-            printer.print_ast(self.callable)
-            for key in self.kwargs:
-                printer.p(',')
-                printer.ind()
-                printer.p(".")
-                printer.p(key)
-                printer.p(" = ")
-                printer.print_ast(self.kwargs[key])
-            printer.ind(0)
-        else:
-            if len(self.args):
-                printer.ind(1)
-            printer.print_ast(self.callable)
-            for arg in self.args:
-                printer.p(',')
-                printer.ind()
-                printer.print_ast(arg)
-            if len(self.args):
-                printer.ind(-1)
+        printer.print_ast(self.callable)
+        for arg in self.args:
+            printer.p(',')
+            printer.ind()
+            printer.print_ast(arg)
+        if len(self.args):
+            printer.ind(-1)
+        printer.p(")")
+
+class SetAttributes(PickleBase):
+    """
+    This operation represents calling __setattr__ or __dict__.update on the object.
+
+    It will call __dict__.update with the given keyword arguments and return the object.
+    """
+    def __init__(self, obj, **kwargs):
+        self.obj = obj
+        self.kwargs = kwargs
+
+    def _serialize(self, pickler):
+        if self.kwargs:
+            pickler.save(self.obj)
+            pickler.save((None, self.kwargs))
+            pickler.write(pickle.BUILD)
+
+    def _print(self, printer):
+        printer.p("SetAttributes(")
+        printer.ind(1)
+        printer.print_ast(self.obj)
+        for key in self.kwargs:
+            printer.p(',')
+            printer.ind()
+            printer.p(".")
+            printer.p(key)
+            printer.p(" = ")
+            printer.print_ast(self.kwargs[key])
+        printer.ind(0)
         printer.p(")")
 
 class Imports(Wrap):
@@ -693,3 +714,163 @@ def Eval(code):
     This node executes `code` in the global (pickle module) namespace and returns the result
     """
     return Import(eval)(code, Globals())
+
+class TransPickler(ast.NodeVisitor):
+    def __init__(self):
+        self.globals = set()
+
+    def visit(self, node):
+        if node is None:
+            return node
+        method = "visit_" + node.__class__.__name__
+        visitor = getattr(self, visitor, None)
+        if visitor is None:
+            raise NotImplementedError(
+                "python to pickle compilation does not support {0} node".format(
+                    node.__class__.__name__))
+        return visitor(node)
+
+    def visit_list(self, nodes):
+        return [self.visit(i) for i in nodes]
+
+    def visit_Module(self, node):
+        body = visit_list(node.body)
+        return Sequence(body)
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Store):
+            if node.name in self.globals:
+                return AssignGlobal(node.name)
+            else:
+                return AssignGlobal(node.name)
+        elif isinstance(node.ctx, ast.Load):
+            if node.name in self.globals:
+                return LoadGlobal(node.name)
+            else:
+                return Load(node.name)
+        else:
+            raise NotImplementedError("Cannot pickle name {0}".format(node.name))
+
+    def visit_Str(self, node):
+        return node.s
+
+    def visit_Num(self, node):
+        return node.n
+
+    def visit_Tuple(self, node):
+        return tuple(self.visit_list(node.elts))
+
+    def visit_List(self, node):
+        return list(self.visit_list(node.elts))
+
+    def visit_Dict(self, node):
+        return dict(zip(self.visit_list(node.keys),
+                        self.visit_list(node.values)))
+
+    def visit_Assign(self, node):
+        assert len(node.targets) == 1
+        left = self.visit(node.targets[0])
+        right = self.visit(node.value)
+        return left[0](*(list(left)[1:]+[right]))
+
+    def visit_Attribute(self, node):
+        if isinstance(node.ctx, ast.Store):
+            return SetAttr, self.visit(node.value), node.attr
+        elif isinstance(node.ctx, ast.Load):
+            return GetAttr(self.visit(node.value), node.attr)
+        else:
+            raise NotImplementedError()
+
+    def visit_Subscript(self, node):
+        if isinstance(node.ctx, ast.Store):
+            return SetItem, self.visit(node.value), self.visit(node.slice)
+        else:
+            return GetItem(self.visit(node.value), self.visit(node.slice))
+
+    def visit_Index(self, node):
+        return self.visit(node.value)
+
+    def visit_Slice(self, node):
+        return slice(self.visit(node.lower),
+                     self.visit(node.upper),
+                     self.visit(node.step))
+
+    def visit_Call(self, node):
+        if node.keywords:
+            raise NotImplementedError()
+        return Call(self.visit(node.func), *self.visit_list(node.args))
+
+    def visit_IfExp(self, node):
+        return Ternary(self.visit(node.test),
+                       self.visit(node.body),
+                       self.visit(node.orelse))
+
+    def visit_Global(self, node):
+        for name in node.names:
+            self.globals.add(name)
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            Assign(alias.asname or alias.name, GetModule(alias.name))
+
+    def visit_ImportFrom(self, node):
+        for alias in node.names:
+            Assign(alias.asname or alias.name, Imports(node.module, alias.name))
+
+    def visit_Exec(self, node):
+        return Eval(Compile(self.visit(node.body), "<string>", "exec"),
+                    self.visit(node.globals),
+                    self.visit(node.locals))
+
+    def visit_BoolOp(self, node):
+        pass
+
+    def visit_BinOp(self, node):
+        pass
+
+    def visit_Compare(self, node):
+        pass
+
+    def visit_UnaryOp(self, node):
+        pass
+
+def ExecAst(string):
+    node = ast.parse(string)
+    node = Deduplicator().visit(node)
+    node = PyAstCompiler().visit(node)
+    return Eval(Compile(node, "<pickle>", "exec"))
+
+class Deduplicator(ast.NodeTransformer):
+    def __init__(self):
+        #mapping of (class, fields) to node
+        self.nodes = {}
+
+    # a node is equal to another one if their id matches, or 
+    # if all(getattr(other, name)==getattr(self, name) for name in self._fields)
+
+    def visit(self, node):
+        for name in node._fields:
+            attr = getattr(node, name)
+            if isinstance(attr, list):
+                setattr(node, name, [self.visit(i) if isinstance(i, ast.AST) else i for i in attr])
+            elif isinstance(attr, ast.AST):
+                setattr(node, name, self.visit(attr))
+
+        fields = [getattr(node, i) for i in node._fields]
+        fields = [tuple(i) if isinstance(i, list) else i for i in fields]
+        original = self.nodes.get((type(node), tuple(fields)), None)
+        if original is not None:
+            return original
+        self.nodes[(type(node), tuple(fields))] = node
+        return node
+
+class PyAstCompiler(ast.NodeTransformer):
+    def visit(self, node):
+        for name in node._fields:
+            attr = getattr(node, name)
+            if isinstance(attr, list):
+                setattr(node, name, [self.visit(i) if isinstance(i, ast.AST) else i for i in attr])
+            elif isinstance(attr, ast.AST):
+                setattr(node, name, self.visit(attr))
+
+        return Call(type(node), *[getattr(node, i) for i in node._fields], cache_id=id(node))
