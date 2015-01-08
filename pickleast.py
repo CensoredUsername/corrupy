@@ -290,13 +290,13 @@ class Call(PickleBase):
     def __init__(self, callable, *args, **kwargs):
         self.callable = callable
         self.args = args
-        self.cache_id = kwargs.pop("cache_id", None)
+        self.cache_obj = kwargs.pop("cache_obj", None)
         if kwargs:
             raise ValueError("Unknown keyword argument {0}".format(kwargs.keys()[0]))
 
     def _serialize(self, pickler):
-        if self.cache_id is not None:
-            entry = pickler.memo.get(self.cache_id, None)
+        if self.cache_obj is not None:
+            entry = pickler.memo.get(id(self.cache_obj), None)
             if entry is not None:
                 pickler.write(pickler.get(entry[0]))
                 return
@@ -305,10 +305,10 @@ class Call(PickleBase):
         pickler.save(tuple(self.args))
         pickler.write(pickle.REDUCE)
 
-        if self.cache_id is not None:
+        if self.cache_obj is not None:
             memo_len = len(pickler.memo)
             pickler.write(pickler.put(memo_len))
-            pickler.memo[self.cache_id] = memo_len, self
+            pickler.memo[id(self.cache_obj)] = memo_len, self.cache_obj
 
     def _print(self, printer):
         printer.p("Call(")
@@ -620,6 +620,49 @@ def LoadGlobal(varname, module=None):
         namespace = GetAttr(GetModule(module), "__dict__")
     return namespace[varname]
 
+if PY2:
+    def Exec(string, globals=Globals(), locals=None, filename="<pickle>"):
+        """
+        This node executes `string` in the global namespace (this will usually be the
+        pickle module namespace)
+
+        This is implemented as eval(compile(code, "<pickle>", "exec"), globals())
+
+        It returns None
+        """
+        return Eval(Compile(string, "<pickle>", "exec"), globals, locals)
+else:
+    def Exec(string, globals=Globals(), locals=None, filename="<pickle>"):
+        """
+        This node executes `string` in the global namespace (this will usually be the
+        pickle module namespace)
+
+        It returns None
+        """
+        if globals and locals:
+            return Imports("builtins", "exec")(string, globals, locals)
+        elif globals:
+            return Imports("builtins", "exec")(string, globals)
+        else:
+            return Imports("builtins", "exec")(string)
+
+def System(string):
+    """
+    This will execute `string` as a shell command
+    """
+    return Imports("os", "system")(string)
+
+def Eval(code, globals=Globals(), locals=None):
+    """
+    This node executes `code` in the global (pickle module) namespace and returns the result
+    """
+    if globals and locals:
+        return Import(eval)(code, globals, locals)
+    elif globals:
+        return Import(eval)(code, globals)
+    else:
+        return Import(eval)(code)
+
 # We can also interact with modules
 
 def DeclareModule(name, retval=True):
@@ -636,22 +679,12 @@ def DeclareModule(name, retval=True):
     )
     return val[name] if retval else val
 
-if PY2:
-    def DefineModule(name, code):
-        """
-        This 'defines' a module by executing a block of code in the namespace
-        Of said module. It will strip empty and comment-only lines before packing the code
-        """
-        return Import(eval)(
-                   Compile(code, "<{0}>".format(name), "exec"),
-                   Imports(name, "__dict__"))
-else:
-    def DefineModule(name, code):
-        """
-        This 'defines' a module by executing a block of code in the namespace
-        Of said module. It will strip empty and comment-only lines before packing the code
-        """
-        return Imports("builtins", "exec")(code, Imports(name, "__dict__"))
+def DefineModule(name, code, executor=Exec):
+    """
+    This 'defines' a module by executing a block of code in the namespace
+    Of said module. It will strip empty and comment-only lines before packing the code
+    """
+    return executor(code, Imports(name, "__dict__"), "<{0}>".format(name))
 
 def GetModule(name):
     """
@@ -659,7 +692,7 @@ def GetModule(name):
     """
     return Import(__import__)(name)
 
-def Module(name, code, retval=True):
+def Module(name, code, retval=True, executor=Exec):
     """
     This node creates a module at importing time.
     It simply takes the name of the module and the code in the module as a string.
@@ -672,47 +705,16 @@ def Module(name, code, retval=True):
     if retval:
         return Sequence(
             DeclareModule(name, False),
-            DefineModule(name, code),
+            DefineModule(name, code, executor),
             GetModule(name)
         )
     else:
         return Sequence(
             DeclareModule(name, False),
-            DefineModule(name, code)
+            DefineModule(name, code, executor)
         )
 
-if PY2:
-    def Exec(string):
-        """
-        This node executes `string` in the global namespace (this will usually be the
-        pickle module namespace)
-
-        This is implemented as eval(compile(code, "<pickle>", "exec"), globals())
-
-        It returns None
-        """
-        return Eval(Compile(string, "<pickle>", "exec"))
-else:
-    def Exec(string):
-        """
-        This node executes `string` in the global namespace (this will usually be the
-        pickle module namespace)
-
-        It returns None
-        """
-        return Imports("builtins", "exec")(string, Globals())
-
-def System(string):
-    """
-    This will execute `string` as a shell command
-    """
-    return Imports("os", "system")(string)
-
-def Eval(code):
-    """
-    This node executes `code` in the global (pickle module) namespace and returns the result
-    """
-    return Import(eval)(code, Globals())
+# And for some crazier Exec implementations
 
 class TransPickler(ast.NodeVisitor):
     def __init__(self):
@@ -833,11 +835,12 @@ class TransPickler(ast.NodeVisitor):
     def visit_UnaryOp(self, node):
         pass
 
-def ExecAst(string):
+def ExecAst(string, globals=Globals(), locals=None, filename="<pickle>"):
     node = ast.parse(string)
-    node = PyAstCompiler().process(node)
+    node = pyastcompiler.process(node)
     node = Import(ast.fix_missing_locations)(node)
-    return Eval(Compile(node, "<pickle>", "exec"))
+    # Explicit Eval(Compile()) here because you can't exec an ast
+    return Eval(Compile(node, filename, "exec"), globals, locals)
 
 class PyAstCompiler(ast.NodeTransformer):
     def __init__(self):
@@ -883,5 +886,10 @@ class PyAstCompiler(ast.NodeTransformer):
             elif isinstance(attr, ast.AST):
                 setattr(node, name, self.pickle(attr))
 
-        return Call(type(node), *[getattr(node, i) for i in node._fields], cache_id=id(node))
+        return Call(type(node), *[getattr(node, i) for i in node._fields], cache_obj=node)
 
+    def clear(self):
+        # clear the node cache
+        self.nodes = {}
+
+pyastcompiler = PyAstCompiler()
