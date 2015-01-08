@@ -37,7 +37,7 @@ def load(file, class_factory=None,
     *class_factory* can be used to control how the missing class definitions are
     created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be used.
 
-    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used
     to indicate how the unpickler should deal with pickle streams generated in python
     2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
     load them as bytes objects, otherwise it will attempt to decode them into unicode
@@ -65,17 +65,17 @@ def safe_load(file, class_factory=None, safe_modules=(), use_copyreg=False,
     class definitions by fake classes, ensuring safety in the unpickling process.
     This is equivalent to ``SafeUnpickler(file).load()``.
 
-    The optional keyword arguments are *class_factory*, *safe_modules*, *use_copyreg*, 
+    The optional keyword arguments are *class_factory*, *safe_modules*, *use_copyreg*,
     *encoding* and *errors*. *class_factory* can be used to control how the missing class
     definitions are created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be
     used. *safe_modules* can be set to a set of strings of module names, which will be
     regarded as safe by the unpickling process, meaning that it will import objects
     from that module instead of generating fake classes (this does not apply to objects
-    in submodules). *use_copyreg* is a boolean value indicating if it's allowed to 
+    in submodules). *use_copyreg* is a boolean value indicating if it's allowed to
     use extensions from the pickle extension registry (documented in the :mod:`copyreg`
     module).
 
-    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used
     to indicate how the unpickler should deal with pickle streams generated in python
     2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
     load them as bytes objects, otherwise it will attempt to decode them into unicode
@@ -123,7 +123,7 @@ def fake_package(name):
 
 def remove_fake_package(name):
     """
-    Removes the fake package tree mounted at *name*. 
+    Removes the fake package tree mounted at *name*.
 
     This works by first looking for any FakePackageLoaders in :data:`sys.path`
     with their root set to *name* and removing them from sys.path. Next it will
@@ -155,7 +155,7 @@ def remove_fake_package(name):
 
     # It is impossible to kill references to the modules, but all traces
     # of it have been removed from the import machinery and the submodule
-    # tree structure has been broken up. 
+    # tree structure has been broken up.
 
 # Fake class implementation
 
@@ -170,7 +170,7 @@ class FakeClassType(type):
     Else if it does not have ``other.__module__`` set, they are equal if
     ``self.__module__ + "." + self.__name__ == other.__name__``.
 
-    Else, they are equal if 
+    Else, they are equal if
     ``self.__module__ == other.__module__ and self.__name__ == other.__name__``
 
     Using this behaviour, ``==``, ``!=``, ``hash()``, ``isinstance()`` and ``issubclass()``
@@ -232,51 +232,51 @@ def _strict_setstate(self, state):
         (state[0] is None or isinstance(state[0], dict)) and
         (state[1] is None or isinstance(state[1], dict))):
         state, slotstate = state
-    
+
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
             raise FakeUnpicklingError("{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state))
         else:
             self.__dict__.update(state)
-        
+
     if slotstate:
         self.__dict__.update(slotstate)
 
 def _warning_setstate(self, state):
     slotstate = None
 
-    if (isinstance(state, tuple) and len(state) == 2 and 
+    if (isinstance(state, tuple) and len(state) == 2 and
         (state[0] is None or isinstance(state[0], dict)) and
         (state[1] is None or isinstance(state[1], dict))):
         state, slotstate = state
-    
+
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
             print("{0}.__setstate__() got unexpected arguments {1}".format(self.__class__, state))
-            self._setstate_args = state 
+            self._setstate_args = state
         else:
             self.__dict__.update(state)
-        
+
     if slotstate:
         self.__dict__.update(slotstate)
 
 def _ignore_setstate(self, state):
     slotstate = None
 
-    if (isinstance(state, tuple) and len(state) == 2 and 
+    if (isinstance(state, tuple) and len(state) == 2 and
         (state[0] is None or isinstance(state[0], dict)) and
         (state[1] is None or isinstance(state[1], dict))):
         state, slotstate = state
-    
+
     if state:
         # Don't have to check for slotstate here since it's either None or a dict
         if not isinstance(state, dict):
-            self._setstate_args = state 
+            self._setstate_args = state
         else:
             self.__dict__.update(state)
-        
+
     if slotstate:
         self.__dict__.update(slotstate)
 
@@ -289,7 +289,7 @@ class FakeClassFactory(object):
     def __init__(self, special_cases, errors='strict', fake_metaclass=FakeClassType, default_bases=(object,)):
         """
         *special_cases* should be a (possibly empty) dictionary which can be used to indicate
-        that certain classes need special methods, attributes or bases. 
+        that certain classes need special methods, attributes or bases.
 
         :class:`FakeClassFactory` provides two methods by default since they can be called
         during the unpickling process, :meth:`__new__` and :meth:`__setstate__` since these can
@@ -475,7 +475,7 @@ class FakeModule(types.ModuleType):
 class FakePackage(FakeModule):
     """
     A :class:`FakeModule` subclass which lazily creates :class:`FakePackage`
-    instances on its attributes when they're requested. 
+    instances on its attributes when they're requested.
 
     This ensures that any attribute of this module is a valid FakeModule
     which can be used to compare against fake classes.
@@ -491,7 +491,7 @@ class FakePackage(FakeModule):
         modname = self.__name__ + "." + name
         mod = sys.modules.get(modname, None)
         if mod is None:
-            try: 
+            try:
                 __import__(modname)
             except:
                 mod = FakePackage(modname)
@@ -544,7 +544,7 @@ class FakeUnpickler(pickle.Unpickler if PY2 else pickle._Unpickler):
     *class_factory* can be used to control how the missing class definitions are
     created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be used.
 
-    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used
     to indicate how the unpickler should deal with pickle streams generated in python
     2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
     load them as bytes objects, otherwise it will attempt to decode them into unicode
@@ -590,17 +590,17 @@ class SafeUnpickler(FakeUnpickler):
 
     *file* is the :term:`binary file` to unserialize.
 
-    The optional keyword arguments are *class_factory*, *safe_modules*, *use_copyreg*, 
+    The optional keyword arguments are *class_factory*, *safe_modules*, *use_copyreg*,
     *encoding* and *errors*. *class_factory* can be used to control how the missing class
     definitions are created. If set to ``None``, ``FakeClassFactory({}, 'strict')`` will be
     used. *safe_modules* can be set to a set of strings of module names, which will be
     regarded as safe by the unpickling process, meaning that it will import objects
     from that module instead of generating fake classes (this does not apply to objects
-    in submodules). *use_copyreg* is a boolean value indicating if it's allowed to 
+    in submodules). *use_copyreg* is a boolean value indicating if it's allowed to
     use extensions from the pickle extension registry (documented in the :mod:`copyreg`
     module).
 
-    In Python 3, the optional keyword arguments *encoding* and *errors* can be used 
+    In Python 3, the optional keyword arguments *encoding* and *errors* can be used
     to indicate how the unpickler should deal with pickle streams generated in python
     2, specifically how to deal with 8-bit string instances. If set to "bytes" it will
     load them as bytes objects, otherwise it will attempt to decode them into unicode
@@ -610,7 +610,7 @@ class SafeUnpickler(FakeUnpickler):
     class_factory when *safe_modules* is empty and *use_copyreg* is False.
     It inherits from :class:`pickle.Unpickler`. (In Python 3 this is actually
     ``pickle._Unpickler``)
-    
+
     It should be noted though that when the unpickler tries to get a nonexistent
     attribute of a safe module, an :exc:`AttributeError` will be raised.
 

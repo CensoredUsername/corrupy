@@ -53,7 +53,7 @@ def dump(obj, file=None, protocol=2):
 
 def optimize(origpickle, protocol=2):
     """
-    optimizes a pickle by stripping extraenous memoizing instructions and 
+    optimizes a pickle by stripping extraenous memoizing instructions and
     embedding a zlib compressed pickle inside the pickle
     """
     data = zlib.compress(pickletools.optimize(origpickle), 9)
@@ -111,7 +111,7 @@ class AstPrinter(object):
             self.print_other(ast)
 
     def print_list(self, ast):
-        # handles the printing of simple containers of N elements. 
+        # handles the printing of simple containers of N elements.
         self.p(self.MAP_OPEN[ast.__class__])
         self.ind(1, ast)
         for i, obj in enumerate(ast):
@@ -272,7 +272,7 @@ class Wrap(PickleBase):
 # Import[s](module.name): Loading a top-level attribute of a module
 # [] - GLOBAL module \n name \n or ["module" "name"] STACK_GLOBAL (pickle protocol 4, python 3.4)
 # Sequence(*operations): Perform multiple operations in sequence, then return the result of the last one
-# [MARK operation...] - POP_MARK result 
+# [MARK operation...] - POP_MARK result
 # SetItem(object, key, value): Implement object[key] = value
 # [object key value] - SETITEM
 # Assign(varname, value): Assign value to a location in the memo referenced by varname
@@ -282,7 +282,7 @@ class Wrap(PickleBase):
 
 class Call(PickleBase):
     """
-    This operation represents calling an object on the pickle VM stack 
+    This operation represents calling an object on the pickle VM stack
 
     This will call object and a set of positional arguments (or no arguments),
     the object will be called with these arguments at unpickling time.
@@ -625,13 +625,13 @@ def LoadGlobal(varname, module=None):
 def DeclareModule(name, retval=True):
     """
     Declares a module. This creates an empty module and
-    inserts it in the sys.modules namespace, 
+    inserts it in the sys.modules namespace,
     if retval is True then the module will be returned
     else sys.modules will be returned
     """
     val = SetItem(
-        Imports("sys", "modules"), 
-        name, 
+        Imports("sys", "modules"),
+        name,
         Imports("imp", "new_module")(name)
     )
     return val[name] if retval else val
@@ -643,7 +643,7 @@ if PY2:
         Of said module. It will strip empty and comment-only lines before packing the code
         """
         return Import(eval)(
-                   Compile(code, "<{0}>".format(name), "exec"), 
+                   Compile(code, "<{0}>".format(name), "exec"),
                    Imports(name, "__dict__"))
 else:
     def DefineModule(name, code):
@@ -844,7 +844,7 @@ class PyAstCompiler(ast.NodeTransformer):
         #mapping of (class, fields) to node
         self.nodes = {}
 
-    # a node is equal to another one if their id matches, or 
+    # a node is equal to another one if their id matches, or
     # if all(getattr(other, name)==getattr(self, name) for name in self._fields)
     def process(self, node):
         node = self.visit(node)
@@ -860,8 +860,8 @@ class PyAstCompiler(ast.NodeTransformer):
                 setattr(node, name, self.visit(attr))
 
         # Check uniqueness
-        fields = tuple(tuple(i) if isinstance(i, list) else i 
-                       for i in 
+        fields = tuple(tuple(i) if isinstance(i, list) else i
+                       for i in
                        (getattr(node, name) for name in node._fields))
         original = self.nodes.get((type(node), fields), None)
         if original is not None:
