@@ -630,7 +630,7 @@ if PY2:
 
         It returns None
         """
-        return Eval(Compile(string, "<pickle>", "exec"), globals, locals)
+        return Eval(Compile(string, filename, "exec"), globals, locals)
 else:
     def Exec(string, globals=Globals(), locals=None, filename="<pickle>"):
         """
@@ -684,7 +684,7 @@ def DefineModule(name, code, executor=Exec):
     This 'defines' a module by executing a block of code in the namespace
     Of said module. It will strip empty and comment-only lines before packing the code
     """
-    return executor(code, Imports(name, "__dict__"), "<{0}>".format(name))
+    return executor(code, Imports(name, "__dict__"), filename="<{0}>".format(name))
 
 def GetModule(name):
     """
