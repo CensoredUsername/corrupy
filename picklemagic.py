@@ -205,7 +205,7 @@ class FakeClassType(type):
 
 
 # Default FakeClass instance methods
-class FakeClassTemplate(type):
+class FakeClassTemplateMeta(type):
     def __new__(cls, name, bases, attributes, module=None):
         # don't need this
         attributes.pop("__qualname__", None)
@@ -213,7 +213,7 @@ class FakeClassTemplate(type):
         # find bases
         actbases = []
         for base in bases:
-            if isinstance(base, FakeClassTemplate):
+            if isinstance(base, FakeClassTemplateMeta):
                 actbases.extend(base.bases)
             else:
                 actbases.append(base)
@@ -232,8 +232,8 @@ class FakeClassTemplate(type):
 
         return self
 
-    def __init__(self, *args, **kwargs):
-        type.__init__(self, *args)
+    def __init__(self, name, bases, attributes, module=None):
+        pass
 
     def __call__(self):
         # instantiating these things makes rather little sense
@@ -242,17 +242,13 @@ class FakeClassTemplate(type):
     def __repr__(self):
         return "<FakeClassTemplate '{0}.{1}'>".format(self.__module__, self.__name__)
 
-if PY2:
-    class fake_class_template(object):
-        __metaclass__ = FakeClassTemplate
-        __module__ = "picklemagic"
-else:
-    class fake_class_template(metaclass=FakeClassTemplate, module="picklemagic"):
-        pass
+# PY2 doesn't like the PY3 way of metaclasses and PY3 doesn't support the PY2 way
+# so we call the metaclass directly
+FakeClassTemplate = FakeClassTemplateMeta("fake_class_template", (), {"__module__": __name__})
 
-class _strict(fake_class_template):
+class _strict(FakeClassTemplate):
     def __new__(cls, *args, **kwargs):
-        self = cls.__bases__[0].__new__(cls)
+        self = super(cls, cls).__new__(cls)
         if args or kwargs:
             raise FakeUnpicklingError("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
         return self
@@ -275,9 +271,9 @@ class _strict(fake_class_template):
         if slotstate:
             self.__dict__.update(slotstate)
 
-class _warning(fake_class_template):
+class _warning(FakeClassTemplate):
     def __new__(cls, *args, **kwargs):
-        self = cls.__bases__[0].__new__(cls)
+        self = super(cls, cls).__new__(cls)
         if args or kwargs:
             print("{0} was instantiated with unexpected arguments {1}, {2}".format(cls, args, kwargs))
             self._new_args = args
@@ -302,9 +298,9 @@ class _warning(fake_class_template):
         if slotstate:
             self.__dict__.update(slotstate)
 
-class _ignore(fake_class_template):
+class _ignore(FakeClassTemplate):
     def __new__(cls, *args, **kwargs):
-        self = cls.__bases__[0].__new__(cls)
+        self = super(cls, cls).__new__(cls)
         if args:
             self._new_args = args
         if kwargs:
