@@ -147,10 +147,27 @@ Fake Classes
 The :mod:`picklemagic` module uses the following classes to provide the necessary
 fake class definitions required by the fake unpickling process.
 
-.. autoclass:: FakeClassType(name, bases, dict)
+.. autoclass:: FakeClassType(name, bases, attributes, module=None)
 
-.. autoclass:: FakeClassFactory(special_cases, errors='strict', fake_metaclass=FakeClassType, default_bases=(object,))
+.. autoclass:: FakeClassFactory(special_cases=(), default=FakeStrict)
    :members: __call__
+
+.. class:: FakeClass()
+.. class:: FakeStrict(*args, **kwargs)
+.. class:: FakeWarning(*args, **kwargs)
+.. class:: FakeIgnore(*args, **kwargs)
+
+These are :class:`FakeClassType` instances which can easily be subclassed to get
+the wanted behaviour. :class:`FakeClass` is a featureless instance for the rest
+to inherit from. :class:`FakeStrict`, :class:`FakeWarning` and :class:`FakeIgnore`
+all define :meth:`__new__` and :meth:`__setstate__` methods to support the fake
+unpickling process. If :class:`FakeStrict` is used, a :exc:`FakeUnpicklingError`
+will be raised if special arguments were passed into the methods during unpickling.
+If :class:`FakeWarning` is used, a warning detailing the arguments will be printed
+and the arguments will be stored inside an attribute of the object
+(:attr:`_setstate_args` or :attr:`_new_args`). Finally if :class:`FakeIgnore` is
+used, any unknown arguments will be stored inside an attribute of the object but
+no warning will be printed.
 
 Fake Modules
 ^^^^^^^^^^^^
