@@ -444,7 +444,6 @@ class FakeUnpickler(pickle.Unpickler if PY2 else pickle._Unpickler):
                 __import__(module)
             except:
                 mod = FakeModule(module)
-                print("Created module {0}".format(str(mod)))
             else:
                 mod = sys.modules[module]
 
