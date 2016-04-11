@@ -190,3 +190,10 @@ These two classes do the actual work behind the fake unpickling process.
 .. autoclass:: FakeUnpickler
 
 .. autoclass:: SafeUnpickler
+
+Utility
+^^^^^^^
+
+Sometimes, it is necessary to be able to pickle the data structures created by the fake unpicklers. While this can be performed using the normal pickle routines from the python standard library for objects created by :class:`FakeUnpickler`, this is not true for objects created by :class:`SafeUnpickler`. Therefore, the following class is made available which allows objecs created by :class:`SafeUnpickler` to be pickled.
+
+.. autoclass:: SafePickler

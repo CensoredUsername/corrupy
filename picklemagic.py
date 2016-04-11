@@ -1,4 +1,4 @@
-# Copyright (c) 2014 CensoredUsername
+# Copyright (c) 2015 CensoredUsername
 
 # This module provides tools for safely analyizing pickle files programmatically
 
@@ -9,6 +9,7 @@ PY2 = not PY3
 
 import types
 import pickle
+import struct
 
 if PY3:
     from io import BytesIO as StringIO
@@ -21,7 +22,8 @@ __all__ = [
     "FakeModule", "FakePackage", "FakePackageLoader",
     "FakeClassType", "FakeClassFactory",
     "FakeClass", "FakeStrict", "FakeWarning", "FakeIgnore",
-    "FakeUnpicklingError", "FakeUnpickler", "SafeUnpickler"
+    "FakeUnpicklingError", "FakeUnpickler", "SafeUnpickler",
+    "SafePickler"
 ]
 
 # Fake class implementation
@@ -85,7 +87,7 @@ class FakeClassType(type):
             return self.__module__ + "." + self.__name__ == other.__name__
 
     def __ne__(self, other):
-        return not self.__eq__(other)
+        return not self == other
 
     def __hash__(self):
         return hash(self.__module__ + "." + self.__name__)
@@ -94,7 +96,7 @@ class FakeClassType(type):
         return self.__subclasscheck__(instance.__class__)
 
     def __subclasscheck__(self, subclass):
-        return (self.__eq__(subclass) or
+        return (self == subclass or
                 (bool(subclass.__bases__) and
                  any(self.__subclasscheck__(base) for base in subclass.__bases__)))
 
@@ -332,7 +334,7 @@ class FakeModule(types.ModuleType):
         return self.__name__ == othername
 
     def __ne__(self, other):
-        return not self.__eq__(other)
+        return not self == other
 
     def __hash__(self):
         return hash(self.__name__)
@@ -341,7 +343,7 @@ class FakeModule(types.ModuleType):
         return self.__subclasscheck__(instance.__class__)
 
     def __subclasscheck__(self, subclass):
-        return (self.__eq__(subclass) or
+        return (self == subclass or
                 (bool(subclass.__bases__) and
                  any(self.__subclasscheck__(base) for base in subclass.__bases__)))
 
@@ -509,6 +511,23 @@ class SafeUnpickler(FakeUnpickler):
             return FakeUnpickler.get_extension(self, code)
         else:
             return self.class_factory("extension_code_{0}".format(code), "copyreg")
+
+class SafePickler(pickle.Pickler if PY2 else pickle._Pickler):
+    """
+    A pickler which can repickle object hierarchies containing objects created by SafeUnpickler.
+    Due to reasons unknown, pythons pickle implementation will normally check if a given class
+    actually matches with the object specified at the __module__ and __name__ of the class. Since
+    this check is performed with object identity instead of object equality we cannot fake this from
+    the classes themselves, and we need to override the method used for normally saving classes.
+    """
+
+    def save_global(self, obj, name=None, pack=struct.pack):
+        if isinstance(obj, FakeClassType):
+            self.write(pickle.GLOBAL + obj.__module__ + '\n' + obj.__name__ + '\n')
+            self.memoize(obj)
+            return
+
+        pickle.Pickler.save_global(self, obj, name, pack)
 
 # the main API
 
