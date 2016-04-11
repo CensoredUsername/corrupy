@@ -17,7 +17,7 @@ else:
     from cStringIO import StringIO
 
 __all__ = [
-    "load", "loads", "safe_load", "safe_loads",
+    "load", "loads", "safe_load", "safe_loads", "safe_dump", "safe_dumps",
     "fake_package", "remove_fake_package",
     "FakeModule", "FakePackage", "FakePackageLoader",
     "FakeClassType", "FakeClassFactory",
@@ -597,6 +597,20 @@ def safe_loads(string, class_factory=None, safe_modules=(), use_copyreg=False,
     """
     return SafeUnpickler(StringIO(string), class_factory, safe_modules, use_copyreg,
                          encoding=encoding, errors=errors).load()
+
+def safe_dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL):
+    """
+    A convenience function wrapping SafePickler. It functions similarly to pickle.dump
+    """
+    SafePickler(file, protocol).dump(obj)
+
+def safe_dumps(obj, protocol=pickle.HIGHEST_PROTOCOL):
+    """
+    A convenience function wrapping SafePickler. It functions similarly to pickle.dumps
+    """
+    file = StringIO()
+    SafePickler(file, protocol).dump(obj)
+    return file.getvalue()
 
 def fake_package(name):
     """
