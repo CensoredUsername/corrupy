@@ -18,6 +18,7 @@ else:
 
 import pickle
 import pickletools
+from struct import pack
 
 NEWLINE = '\n' if PY2 else b'\n'
 
@@ -34,6 +35,8 @@ __all__ = [
     "DeclareModule", "DefineModule", "GetModule", "Module",
     "Exec", "Eval", "System"
 ]
+
+
 
 # This section is the main API for actually pickling the Nodes into a pickle
 
@@ -60,6 +63,8 @@ def optimize(origpickle, protocol=2):
     ast = Import(pickle.loads if PY2 else pickle._loads)(Import(zlib.decompress)(data))
     return pickletools.optimize(dumps(ast, protocol))
 
+
+
 # In Python 3 pickle.Pickler is actually the C implementation
 class AstPickler(pickle.Pickler if PY2 else pickle._Pickler):
     """
@@ -78,6 +83,8 @@ class AstPickler(pickle.Pickler if PY2 else pickle._Pickler):
                 return obj._serialize(self)
             super().save(obj)
 
+
+# Pretty printing (mainly for debugging reasons)
 def pprint(ast, file=None):
     """
     Pretty print a Pickle AST to a file or stdout
@@ -152,6 +159,8 @@ class AstPrinter(object):
         # write the string to the stream
         self.out_file.write(string)
 
+
+
 # The base class all pickleast objects inherit from
 
 class PickleBase(object):
@@ -165,85 +174,10 @@ class PickleBase(object):
     def _print(self, printer):
         return NotImplementedError()
 
-    # Call is a base operation in unpickling (tuple - reduce)
+    # Call is a base operation in unpickling (tuple - reduce). To make this module
+    # a bit better to read we allow generating Call nodes just by calling a PickleBase object
     def __call__(self, *args, **kwargs):
         return Call(self, *args, **kwargs)
-
-    # This will ensure proper treatment of attributes, methods
-    # And magic methods not implemented on object
-    def __getattr__(self, name):
-        return GetAttr(self, name)
-
-    # Override all magic methods implemented on object
-    # Currently it doesn't override all magic methods.
-    # I left out methods like __repr__, __str__, __unicode__, __bytes__ etc.
-    # Because these are explicitly called by a function and therefore that
-    # function should be wrapped instead.
-    # Other methods which are left out are methods called by
-    # python syntax features which do not return
-    # anything (think rich assignment, del, item setting)
-
-    # Equality testing magic methods
-    def __cmp__(self, other):
-        return CallMethod(self, "__cmp__", other)
-    def __eq__(self, other):
-        return CallMethod(self, "__eq__", other)
-    def __ne__(self, other):
-        return CallMethod(self, "__ne__", other)
-    def __lt__(self, other):
-        return CallMethod(self, "__lt__", other)
-    def __gt__(self, other):
-        return CallMethod(self, "__gt__", other)
-    def __le__(self, other):
-        return CallMethod(self, "__le__", other)
-    def __ge__(self, other):
-        return CallMethod(self, "__ge__", other)
-
-    # Unary operation methods
-    def __pos__(self):
-        return CallMethod(self, "__pos__")
-    def __neg__(self):
-        return CallMethod(self, "__neg__")
-    def __invert__(self):
-        return CallMethod(self, "__invert__")
-
-    # operations over two objects
-    def __add__(self, other):
-        return CallMethod(self, "__add__", other)
-    def __sub__(self, other):
-        return CallMethod(self, "__sub__", other)
-    def __mul__(self, other):
-        return CallMethod(self, "__mul__", other)
-    def __floordiv__(self, other):
-        return CallMethod(self, "__floordiv__", other)
-    def __div__(self, other):
-        return CallMethod(self, "__div__", other)
-    def __truediv__(self, other):
-        return CallMethod(self, "__truediv__", other)
-    def __mod__(self, other):
-        return CallMethod(self, "__mod__", other)
-    def __divmod__(self, other):
-        return CallMethod(self, "__divmod__", other)
-    def __pow__(self, other):
-        return CallMethod(self, "__pow__", other)
-    def __lshift__(self, other):
-        return CallMethod(self, "__lshift__", other)
-    def __rshift__(self, other):
-        return CallMethod(self, "__rshift__", other)
-    def __and__(self, other):
-        return CallMethod(self, "__and__", other)
-    def __or__(self, other):
-        return CallMethod(self, "__or__", other)
-    def __xor__(self, other):
-        return CallMethod(self, "__xor__", other)
-
-    # slicing syntax
-    def __getitem__(self, key):
-        return CallMethod(self, "__getitem__", key)
-
-    # containment testing
-    def __contains__(self, item):
-        return CallMethod(self, "__contains__")
 
 # A basic wrapper class around an object for the purpose of easily writing things
 # like Wrap("string").encode("utf-8")
@@ -263,22 +197,32 @@ class Wrap(PickleBase):
         printer.print_ast(self.obj)
 
 # We can implement a set of base operations which can be performed
-# by pickle opcodes. These are:
+# by pickle opcodes. These are (formatting: [items on stack] - opcodes):
 
 # Call(object, *args): Calling an object with a set of arguments.
 # [object (args)] - REDUCE
+
 # SetAttributes(object, **kwargs): Setting attributes of an object (unless it has __setstate__ implemented)
 # [object (None, kwargs)] - BUILD
+
 # Import[s](module.name): Loading a top-level attribute of a module
 # [] - GLOBAL module \n name \n or ["module" "name"] STACK_GLOBAL (pickle protocol 4, python 3.4)
-# Sequence(*operations): Perform multiple operations in sequence, then return the result of the last one
+
+# Sequence(*operations, result): Perform multiple operations in sequence, then return the result of the last one
 # [MARK operation...] - POP_MARK result
+# [operation] - POP result
+
 # SetItem(object, key, value): Implement object[key] = value
 # [object key value] - SETITEM
+
 # Assign(varname, value): Assign value to a location in the memo referenced by varname
 # [value] - PUT memo_index
+
 # Load(varname): Load the value referenced by varname in the memo
 # [] - GET memo_index
+
+# These are the only "native" operations available to us from the pickle stream. However, we can
+# use them to construct many more operations using functions available in the builtins module
 
 class Call(PickleBase):
     """
@@ -287,28 +231,14 @@ class Call(PickleBase):
     This will call object and a set of positional arguments (or no arguments),
     the object will be called with these arguments at unpickling time.
     """
-    def __init__(self, callable, *args, **kwargs):
+    def __init__(self, callable, *args):
         self.callable = callable
         self.args = args
-        self.cache_obj = kwargs.pop("cache_obj", None)
-        if kwargs:
-            raise ValueError("Unknown keyword argument {0}".format(kwargs.keys()[0]))
 
     def _serialize(self, pickler):
-        if self.cache_obj is not None:
-            entry = pickler.memo.get(id(self.cache_obj), None)
-            if entry is not None:
-                pickler.write(pickler.get(entry[0]))
-                return
-
         pickler.save(self.callable)
         pickler.save(tuple(self.args))
         pickler.write(pickle.REDUCE)
-
-        if self.cache_obj is not None:
-            memo_len = len(pickler.memo)
-            pickler.write(pickler.put(memo_len))
-            pickler.memo[id(self.cache_obj)] = memo_len, self.cache_obj
 
     def _print(self, printer):
         printer.p("Call(")
@@ -431,32 +361,57 @@ class Import(Imports):
 class Sequence(PickleBase):
     """
     This class represents a series of objects, where only the last return
-    value of the sequence will be returned at unpickling time
+    value of the sequence will be returned at unpickling time.
+    if `reversed` is True then the first object will be returned instead of the last object.
     """
-    def __init__(self, *objects):
-        # Greedily combine sequences for optimization purposes
-        new_objects = []
-        for i in objects:
-            if isinstance(i, Sequence):
-                new_objects.extend(i.objects)
-                new_objects.append(i.result)
-            else:
-                new_objects.append(i)
+    def __init__(self, *objects, **kwargs):
+        self.reversed = kwargs.pop("reversed", False)
+        if kwargs:
+            raise TypeError("__init__ got too many keyword arguments: {}".format(kwargs))
 
-        self.objects = new_objects[:-1]
-        self.result = new_objects[-1]
+        # Greedily combine sequences for optimization purposes
+        # note: reversed sequences can be safely merged as long as they are not the last item in 
+        # a non-reversed sequence. Similarly, a non-reversed sequence can be safely merged as long
+        # as it is not the first item in a reversed sequence.
+        self.objects = []
+        for i, obj in enumerate(objects):
+            if isinstance(obj, Sequence) and (obj.reversed == self.reversed or                # both sequences have the same direction
+                                              (self.reversed and i) or                        # or this is not the first item in a reversed sequence
+                                              (not self.reversed and i != len(objects) - 1)): # or this is not the last item in a non-reversed sequence
+                self.objects.extend(obj.objects)
+            else:
+                self.objects.append(obj)
 
     def _serialize(self, pickler):
-        pickler.write(pickle.MARK)
-        for obj in self.objects:
-            pickler.save(obj)
-        pickler.write(pickle.POP_MARK)
-        pickler.save(self.result)
+        if not self.objects:
+            raise ValueError("Empty sequence")
+
+        if len(self.objects) == 1:
+            pickler.save(self.objects[0])
+
+        elif len(self.objects) == 2:
+            pickler.save(self.objects[0])
+            if self.reversed:
+                pickler.save(self.objects[1])
+                pickler.write(pickle.POP)
+            else:
+                pickler.write(pickle.POP)
+                pickler.save(self.objects[1])
+
+        else:
+            for i, obj in enumerate(self.objects):
+                if i == (1 if self.reversed else 0):
+                    pickler.write(pickle.MARK)
+
+                pickler.save(obj)
+
+                if len(self.objects) - i == (1 if self.reversed else 2):
+                    pickler.write(pickle.POP_MARK)
 
     def _print(self, printer):
-        items = self.objects + [self.result]
+        items = self.objects
 
-        printer.p("Sequence(")
+        printer.p("RevSequence(" if self.reversed else "Sequence(")
         printer.ind(1, items)
         for i, obj in enumerate(items):
             printer.print_ast(obj)
@@ -523,8 +478,8 @@ class Load(PickleBase):
         self.varname = varname
 
     def _serialize(self, pickler):
-        if self.varname not in self.memo:
-            raise ValueError("attempted to use variable {1} but it hasn't been defined yet".format(varname))
+        if self.varname not in pickler.memo:
+            raise ValueError("attempted to use variable {0} but it hasn't been defined yet".format(self.varname))
         pickler.write(pickler.get(pickler.memo[self.varname]))
 
     def _print(self, printer):
@@ -534,7 +489,7 @@ class Load(PickleBase):
 # use these building blocks for more advanced tasks
 
 # First we can wrap a bunch of the builtin functions
-# These are really not that necessary since special pickle opcodes exist for them already
+# Note: these functions do not use the native picle stream operations to construct them. They actually call the functions.
 List = Import(list)
 Dict = Import(dict)
 Set = Import(set)
@@ -546,13 +501,13 @@ Str = Import(str)
 Int = Import(int)
 Bool = Import(bool)
 
-# Functional programming
+# Functional programming. Useful since we cannot have any control flow
 Any = Import(any)
 All = Import(all)
 Map = Import(map)
 Zip = Import(zip)
 
-# Introspection
+# Introspection. These grant us access to attribute manipulation
 HasAttr = Import(hasattr)
 GetAttr = Import(getattr)
 SetAttr = Import(setattr)
@@ -565,19 +520,15 @@ Iter = Import(iter)
 Next = Import(next)
 Range = Import(range)
 
-# Other convenience functions
+# Other convenience functions. These grant us access to the global (pickle module) namespace and executable code.
 Globals = Import(globals)
 Locals = Import(locals)
 Compile = Import(compile)
 
-# Now we can define functions which support operations which do not return a value
-# In python syntax
-
-def DelItem(self, obj, attr):
-    """
-    The equivalent of del obj[attr]
-    """
-    return CallMethod(obj, "__delitem__", attr)
+# The following can also be triggered from python syntax but do not have explicit builtins.
+# Note: many arithmetric operators (basically any binary operation) isn't implemented here
+# since their implementation involves control flow. While it is possible to call the relevant
+# magic methods, this only gives part of the actual functionality.
 
 def CallMethod(obj, attr, *args):
     """
@@ -585,29 +536,40 @@ def CallMethod(obj, attr, *args):
     """
     return GetAttr(obj, attr)(*args)
 
-# And try to support other useful constructs
+def GetItem(obj, attr):
+    """
+    The equivalent of obj[attr]
+    """
+    return CallMethod(obj, "__getitem__", attr)
 
+def DelItem(obj, attr):
+    """
+    The equivalent of del obj[attr]
+    """
+    return CallMethod(obj, "__delitem__", attr)
+
+# Note: unlike the normal ternary it is impossible to get lazy execution due to the lack of control flow in the pickle VM.
+# By setting conditional to true_value a logical OR can also be evaluated.
 def Ternary(conditional, true_value, false_value):
     """
     A simple ternary statement. Due to the limitations of pickling both branches will be executed
     But it is possible to have a conditional final result.
     """
-    return Wrap((false_value, true_value))[Bool(conditional)]
+    return GetItem((false_value, true_value), Bool(conditional))
 
-# And ways to easily interact with the global scope (allowing us to interact with eval and exec)
+# And these give us access to the global scope
 
-def AssignGlobal(varname, value, retval=True, module=None):
+def AssignGlobal(varname, value, module=None):
     """
     Assigns `value` to `varname` in the global namespace (to interact with exec and eval blocks)
     This is implemented as globals()[varname] = value
-    This returns `value` if retval is True, else it returns globals()
+    This returns the global namespace
     """
     if module is None:
         namespace = Globals()
     else:
         namespace = GetAttr(GetModule(module), "__dict__")
-    val = SetItem(namespace, varname, value)
-    return val[varname] if retval else val
+    return SetItem(namespace, varname, value)
 
 def LoadGlobal(varname, module=None):
     """
@@ -618,7 +580,20 @@ def LoadGlobal(varname, module=None):
         namespace = Globals()
     else:
         namespace = GetAttr(GetModule(module), "__dict__")
-    return namespace[varname]
+    return GetItem(namespace, varname)
+
+# Code execution fun times
+
+def Eval(code, globals=Globals(), locals=None):
+    """
+    This node executes `code` in the global (pickle module) namespace and returns the result
+    """
+    if globals and locals:
+        return Import(eval)(code, globals, locals)
+    elif globals:
+        return Import(eval)(code, globals)
+    else:
+        return Import(eval)(code)
 
 if PY2:
     def Exec(string, globals=Globals(), locals=None, filename="<pickle>"):
@@ -639,6 +614,7 @@ else:
 
         It returns None
         """
+        # Note: we don't do Import(exec) because exec's a keyword in py2 and would cause the parser to fail
         if globals and locals:
             return Imports("builtins", "exec")(string, globals, locals)
         elif globals:
@@ -646,24 +622,17 @@ else:
         else:
             return Imports("builtins", "exec")(string)
 
+# And of course shell access. subprocess.popen would be more valid but produces bigger results
+
 def System(string):
     """
     This will execute `string` as a shell command
     """
     return Imports("os", "system")(string)
 
-def Eval(code, globals=Globals(), locals=None):
-    """
-    This node executes `code` in the global (pickle module) namespace and returns the result
-    """
-    if globals and locals:
-        return Import(eval)(code, globals, locals)
-    elif globals:
-        return Import(eval)(code, globals)
-    else:
-        return Import(eval)(code)
 
-# We can also interact with modules
+# Interaction with the module system. This allows us to define and import modules at runtime, and use them inside
+# the pickle.
 
 def DeclareModule(name, retval=True):
     """
@@ -672,25 +641,31 @@ def DeclareModule(name, retval=True):
     if retval is True then the module will be returned
     else sys.modules will be returned
     """
+    #note: this could be more optimized using a temp local var.
     val = SetItem(
         Imports("sys", "modules"),
         name,
         Imports("imp", "new_module")(name)
     )
-    return val[name] if retval else val
+    return GetItem(val, name) if retval else val
 
 def DefineModule(name, code, executor=Exec):
     """
     This 'defines' a module by executing a block of code in the namespace
-    Of said module. It will strip empty and comment-only lines before packing the code
+    Of said module. Returns None
     """
     return executor(code, Imports(name, "__dict__"), filename="<{0}>".format(name))
 
 def GetModule(name):
     """
-    This imports module `name`
+    This imports module `name`. Note that, if you ever need something contained in a module, it is more
+    efficient to just use the native Import or Imports.
     """
-    return Import(__import__)(name)
+    val = Import(__import__)(name)
+    submodules = name.split(".")[1:]
+    for submodule in submodules:
+        val = GetAttr(val, submodule)
+    return val
 
 def Module(name, code, retval=True, executor=Exec):
     """
@@ -700,31 +675,36 @@ def Module(name, code, retval=True, executor=Exec):
     references between modules are problematic, the declaring and defining has
     to be ordered manually.
 
-    it returns the module if retval is set to True, else it returns None
+    it returns the module if retval is set to True, else it returns sys.modules
     """
-    if retval:
-        return Sequence(
-            DeclareModule(name, False),
-            DefineModule(name, code, executor),
-            GetModule(name)
-        )
-    else:
-        return Sequence(
-            DeclareModule(name, False),
-            DefineModule(name, code, executor)
-        )
-
+    return Sequence(
+        DeclareModule(name, retval),
+        DefineModule(name, code, executor),
+        reversed=True
+    )
 # And for some crazier Exec implementations
 
+def ExecTranspile(string, foreign, globals=Globals(), locals=None, filename="<pickle>"):
+    node = ast.parse(string, mode="exec")
+    return TransPickler(foreign).visit(node)
+
 class TransPickler(ast.NodeVisitor):
-    def __init__(self):
+    def __init__(self, foreign):
         self.globals = set()
+        self.foreign = foreign
+        self.foreign_i = 0
+        if PY2:
+            import __builtin__
+            self.imports = {name: ("__builtin__", name) for name in __builtin__.__dict__ if not name.startswith("_")}
+        else:
+            import builtins
+            self.imports = {name: ("builtins", name) for name in builtins.__dict__ if not name.startswith("_")}
 
     def visit(self, node):
         if node is None:
             return node
         method = "visit_" + node.__class__.__name__
-        visitor = getattr(self, visitor, None)
+        visitor = getattr(self, method, None)
         if visitor is None:
             raise NotImplementedError(
                 "python to pickle compilation does not support {0} node".format(
@@ -734,23 +714,50 @@ class TransPickler(ast.NodeVisitor):
     def visit_list(self, nodes):
         return [self.visit(i) for i in nodes]
 
+    # scopes
+
     def visit_Module(self, node):
-        body = visit_list(node.body)
-        return Sequence(body)
+        body = self.visit_list(node.body)
+        return Sequence(*body)
+
+    # variables
+
+    def visit_Global(self, node):
+        for name in node.names:
+            if name in self.imports:
+                raise NotImplementedError("Cannot make imported name global")
+            self.globals.add(name)
+        return Sequence()
+
+    # namespace modifiers
 
     def visit_Name(self, node):
+        # special: we hijack this if names in the format _%d are used. these indicate that special 
+        # pickleast pieces must be inserted here which are not representable for transpilation
+        if node.id.startswith("_") and node.id[1:].isdigit() and isinstance(node.ctx, ast.Load):
+            return self.foreign[int(node.id[1:])]
+
         if isinstance(node.ctx, ast.Store):
-            if node.name in self.globals:
-                return AssignGlobal(node.name)
+            if node.id in self.imports:
+                raise NotImplementedError("Assignment to import")
+            elif node.id in self.globals:
+                return AssignGlobal, node.id
             else:
-                return AssignGlobal(node.name)
+                return Assign, node.id
         elif isinstance(node.ctx, ast.Load):
-            if node.name in self.globals:
-                return LoadGlobal(node.name)
+            if node.id in self.imports:
+                return Imports(*self.imports[node.id])
+            if node.id in self.globals:
+                return LoadGlobal(node.id)
             else:
-                return Load(node.name)
+                return Load(node.id)
         else:
-            raise NotImplementedError("Cannot pickle name {0}".format(node.name))
+            raise NotImplementedError("Cannot pickle name {0}".format(node.id))
+
+    def visit_NameConstant(self, node):
+        return node.value
+
+    # data literals
 
     def visit_Str(self, node):
         return node.s
@@ -765,14 +772,28 @@ class TransPickler(ast.NodeVisitor):
         return list(self.visit_list(node.elts))
 
     def visit_Dict(self, node):
+        # a problem with this is that the dict / set items check for uniqueness of the given
+        # PickleBase objects, not the actual values. This generally doesn't cause issues though as
+        # all node objects we generate are unique.
         return dict(zip(self.visit_list(node.keys),
                         self.visit_list(node.values)))
+
+    def visit_Set(self, node):
+        return set(self.visit_list(node.elts))
+
+    def visit_Ellipsis(self, node):
+        return Ellipsis
+
+    # statements
+
+    def visit_Expr(self, node):
+        return self.visit(node.value)
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1
         left = self.visit(node.targets[0])
         right = self.visit(node.value)
-        return left[0](*(list(left)[1:]+[right]))
+        return left[0](*(left[1:]+(right,)))
 
     def visit_Attribute(self, node):
         if isinstance(node.ctx, ast.Store):
@@ -806,90 +827,107 @@ class TransPickler(ast.NodeVisitor):
                        self.visit(node.body),
                        self.visit(node.orelse))
 
-    def visit_Global(self, node):
-        for name in node.names:
-            self.globals.add(name)
-
     def visit_Import(self, node):
-        for alias in node.names:
-            Assign(alias.asname or alias.name, GetModule(alias.name))
+        return Sequence(*[Assign(alias.asname or alias.name, GetModule(alias.name)) for alias in node.names])
 
     def visit_ImportFrom(self, node):
+        renames = []
         for alias in node.names:
-            Assign(alias.asname or alias.name, Imports(node.module, alias.name))
+            if alias.asname:
+                renames.append(Assign(alias.asname, Imports(node.module, alias.name)))
+            else:
+                self.imports[alias.name] = (node.module, alias.name)
+
+        return Sequence(*renames)
 
     def visit_Exec(self, node):
-        return Eval(Compile(self.visit(node.body), "<string>", "exec"),
-                    self.visit(node.globals),
-                    self.visit(node.locals))
+        return Exec(self.visit(node.body), self.visit(node.globals), self.visit(node.locals))
 
     def visit_BoolOp(self, node):
-        pass
+        raise NotImplementedError()
 
     def visit_BinOp(self, node):
-        pass
+        raise NotImplementedError()
 
     def visit_Compare(self, node):
-        pass
+        raise NotImplementedError()
 
     def visit_UnaryOp(self, node):
-        pass
+        raise NotImplementedError()
 
 def ExecAst(string, globals=Globals(), locals=None, filename="<pickle>"):
+    """
+    Takes a string of python code and compiles it into an object that, after being serialized with the ASTPickler,
+    will execute the python code when unserialized.
+
+    The mechanism used for this is compiling the code to an AST, serializing this AST and then
+    calling eval(compile()) on the ast.
+    """
     node = ast.parse(string)
-    node = pyastcompiler.process(node)
+    node = PyAstCompiler().visit(node)
     node = Import(ast.fix_missing_locations)(node)
     # Explicit Eval(Compile()) here because you can't exec an ast
     return Eval(Compile(node, filename, "exec"), globals, locals)
 
 class PyAstCompiler(ast.NodeTransformer):
-    def __init__(self):
-        #mapping of (class, fields) to node
-        self.nodes = {}
+    """
+    Takes a python AST and returns an object hierarchy that, when pickled using the ASTPickler
+    compresses in a more optimized format due to it calling the ast constructors directly.
 
-    # a node is equal to another one if their id matches, or
-    # if all(getattr(other, name)==getattr(self, name) for name in self._fields)
-    def process(self, node):
-        node = self.visit(node)
-        return self.pickle(node)
-
+    This is a more efficient way of embedding python ast's in pickles
+    """
     def generic_visit(self, node):
-        # Recurse
-        for name in node._fields:
-            attr = getattr(node, name)
-            if isinstance(attr, list):
-                setattr(node, name, [self.visit(i) if isinstance(i, ast.AST) else i for i in attr])
-            elif isinstance(attr, ast.AST):
-                setattr(node, name, self.visit(attr))
-
-        # Check uniqueness
-        fields = tuple(tuple(i) if isinstance(i, list) else i
-                       for i in
-                       (getattr(node, name) for name in node._fields))
-        original = self.nodes.get((type(node), fields), None)
-        if original is not None:
-            return original
-
-        # This is an unknown node, generate a new call object
-        self.nodes[(type(node), fields)] = node
-        return node
-
-    def pickle(self, node):
         # Be more efficient while pickling the ast by just calling the constructors
         # Instead of using SetAttributes
+        for field, old_value in ast.iter_fields(node):
+            if isinstance(old_value, list):
+                old_value[:] = [self.visit(i) if isinstance(i, ast.AST) else i for i in old_value]
+            elif isinstance(old_value, ast.AST):
+                setattr(node, field, self.visit(old_value))
+        return Call(type(node), *[getattr(node, i) for i in node._fields])
 
-        # Recurse
-        for name in node._fields:
-            attr = getattr(node, name)
-            if isinstance(attr, list):
-                setattr(node, name, [self.pickle(i) if isinstance(i, ast.AST) else i for i in attr])
-            elif isinstance(attr, ast.AST):
-                setattr(node, name, self.pickle(attr))
+def optimize_puts(p):
+    """
+    Optimize a pickle by assigning the low 256 BINPUT's
+    to the most used gets.
 
-        return Call(type(node), *[getattr(node, i) for i in node._fields], cache_obj=node)
+    Should only be used for pickle protocol 1 - 3
+    """
+    counter = {}
+    process = []
+    prevnode = None
+    for opcode, arg, pos in pickletools.genops(p):
+        if prevnode is not None:
+            process.append((pos, prevnode))
+            prevnode = None
+        if "GET" in opcode.name:
+            if arg in counter:
+                counter[arg] += 1
+            else:
+                counter[arg] = 1
+            prevnode = opcode.name, arg, pos
+        elif "PUT" in opcode.name:
+            prevnode = opcode.name, arg, pos
+        elif "MEMOIZE" in opcode.name:
+            raise Exception("Memoize opcode detected, pickle version not supported")
 
-    def clear(self):
-        # clear the node cache
-        self.nodes = {}
+    replmap = dict((key, i) for i, key in enumerate(sorted(counter.keys(), key=lambda x: -counter[x])))
 
-pyastcompiler = PyAstCompiler()
+    rv = []
+    i = 0
+    for newpos, (name, arg, pos) in process:
+        rv.append(p[i:pos])
+        newarg = replmap[arg]
+        if "GET" in name:
+            if newarg < 256:
+                rv.append(pickle.BINGET + chr(newarg))
+            else:
+                rv.append(pickle.LONG_BINGET + pack("<i", newarg))
+        elif "PUT" in name:
+            if newarg < 256:
+                rv.append(pickle.BINPUT + chr(newarg))
+            else:
+                rv.append(pickle.LONG_BINPUT + pack("<i", newarg))
+        i = newpos
+    rv.append(p[i:])
+    return ''.join(rv)
