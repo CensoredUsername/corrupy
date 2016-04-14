@@ -18,6 +18,7 @@ else:
 
 import pickle
 import pickletools
+import operator
 from struct import pack
 
 NEWLINE = '\n' if PY2 else b'\n'
@@ -654,7 +655,7 @@ def DefineModule(name, code, executor=Exec):
     This 'defines' a module by executing a block of code in the namespace
     Of said module. Returns None
     """
-    return executor(code, Imports(name, "__dict__"), filename="<{0}>".format(name))
+    return executor(code, globals=Imports(name, "__dict__"), filename="<{0}>".format(name))
 
 def GetModule(name):
     """
@@ -684,7 +685,7 @@ def Module(name, code, retval=True, executor=Exec):
     )
 # And for some crazier Exec implementations
 
-def ExecTranspile(string, foreign, globals=Globals(), locals=None, filename="<pickle>"):
+def ExecTranspile(string, foreign=(), globals=Globals(), locals=None, filename="<pickle>"):
     node = ast.parse(string, mode="exec")
     return TransPickler(foreign).visit(node)
 
@@ -844,16 +845,62 @@ class TransPickler(ast.NodeVisitor):
         return Exec(self.visit(node.body), self.visit(node.globals), self.visit(node.locals))
 
     def visit_BoolOp(self, node):
+        # replace by ternary with a temp var.
         raise NotImplementedError()
 
+    BINOP_MAP = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.LShift: operator.lshift,
+        ast.RShift: operator.rshift,
+        ast.BitOr: operator.or_,
+        ast.BitXor: operator.xor,
+        ast.BitAnd: operator.and_
+    }
     def visit_BinOp(self, node):
-        raise NotImplementedError()
+        return Import(self.BINOP_MAP[node.op.__class__])(self.visit(node.left), self.visit(node.right))
 
+    COMPARE_MAP = {
+        ast.Eq: operator.eq,
+        ast.NotEq: operator.ne,
+        ast.Lt: operator.lt,
+        ast.LtE: operator.le,
+        ast.Gt: operator.gt,
+        ast.GtE: operator.ge,
+        ast.Is: operator.is_,
+        ast.IsNot: operator.is_not,
+    }
     def visit_Compare(self, node):
-        raise NotImplementedError()
+        if len(node.comparators) > 1:
+            raise SyntaxError("mutliple comparison is not supported")
+        left = self.visit(node.left)
+        right = self.visit(node.comparators[0])
+        op = node.ops[0]
+        if op.__class__ == ast.In:
+            return Import(operator.contains(right, left))
+        elif op.__class__ == ast.NotIn:
+            return Import(operator.not_)(Import(operator.contains)(right, left))
+        else:
+            return Import(self.COMPARE_MAP[op.__class__])(left, right)
 
     def visit_UnaryOp(self, node):
-        raise NotImplementedError()
+        value = self.visit(node.operand)
+        if node.op.__class__ == UAdd:
+            return Import(operator.pos)(value)
+        elif node.op.__class__ == USub:
+            return Import(operator.neg)(value)
+        elif node.op.__class__ == Not:
+            return Import(operator.not_)(value)
+        elif node.op.__class__ == Invert:
+            return Import(operator.invert)(value)
+        else:
+            raise Exception("Unreachable")
+
 
 def ExecAst(string, globals=Globals(), locals=None, filename="<pickle>"):
     """
