@@ -890,13 +890,13 @@ class TransPickler(ast.NodeVisitor):
 
     def visit_UnaryOp(self, node):
         value = self.visit(node.operand)
-        if node.op.__class__ == UAdd:
+        if node.op.__class__ == ast.UAdd:
             return Import(operator.pos)(value)
-        elif node.op.__class__ == USub:
+        elif node.op.__class__ == ast.USub:
             return Import(operator.neg)(value)
-        elif node.op.__class__ == Not:
+        elif node.op.__class__ == ast.Not:
             return Import(operator.not_)(value)
-        elif node.op.__class__ == Invert:
+        elif node.op.__class__ == ast.Invert:
             return Import(operator.invert)(value)
         else:
             raise Exception("Unreachable")
