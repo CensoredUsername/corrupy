@@ -1,2 +1,12 @@
-*.pyc
+__pycache__
+*.py[co]
+/*.egg-info
+build
+dist
+.eggs
+monkeytype.sqlite3
+/.ipynb_checkpoints
+*.srctrlbm
+*.srctrldb
 *.sublime*
+
