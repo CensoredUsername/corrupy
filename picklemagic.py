@@ -498,12 +498,12 @@ class SafeUnpickler(FakeUnpickler):
     def find_class(self, module, name):
         if module in self.safe_modules:
             __import__(module)
-            mod = sys.modules[module]
-            klass = getattr(mod, name)
-            return klass
+            if not hasattr(module, "__all__") or name in module.__all__:
+                mod = sys.modules[module]
+                klass = getattr(mod, name)
+                return klass
 
-        else:
-            return self.class_factory(name, module)
+        return self.class_factory(name, module)
 
     def get_extension(self, code):
         if self.use_copyreg:
