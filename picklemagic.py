@@ -498,8 +498,8 @@ class SafeUnpickler(FakeUnpickler):
     def find_class(self, module, name):
         if module in self.safe_modules:
             __import__(module)
-            if not hasattr(module, "__all__") or name in module.__all__:
-                mod = sys.modules[module]
+            mod = sys.modules[module]
+            if not hasattr(mod, "__all__") or name in mod.__all__:
                 klass = getattr(mod, name)
                 return klass
 
