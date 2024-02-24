@@ -643,10 +643,15 @@ def DeclareModule(name, retval=True):
     else sys.modules will be returned
     """
     #note: this could be more optimized using a temp local var.
+    if PY2:
+        module_fn = Imports("imp", "new_module")
+    else:
+        module_fn = Imports("types", "ModuleType")
+
     val = SetItem(
         Imports("sys", "modules"),
         name,
-        Imports("imp", "new_module")(name)
+        module_fn(name)
     )
     return GetItem(val, name) if retval else val
 
@@ -882,7 +887,7 @@ class TransPickler(ast.NodeVisitor):
         right = self.visit(node.comparators[0])
         op = node.ops[0]
         if op.__class__ == ast.In:
-            return Import(operator.contains(right, left))
+            return Import(operator.contains)(right, left)
         elif op.__class__ == ast.NotIn:
             return Import(operator.not_)(Import(operator.contains)(right, left))
         else:
