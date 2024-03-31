@@ -1,5 +1,6 @@
 # License
 # Copyright (c) 2008, Armin Ronacher
+# Significant changes made 2014-2024 by CensoredUsername
 # All rights reserved.
 
 # Redistribution and use in source and binary forms, with or without modification,
