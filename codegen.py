@@ -44,6 +44,7 @@ from ast import *
 
 if PY3:
     unicode = str
+    long = int
 else:
     bytes = str
     str = unicode
@@ -210,6 +211,7 @@ class SourceGenerator(NodeVisitor):
     ASSIGN = ' = '
     SEMICOLON = '; '
     ARROW = ' -> '
+    WALRUS = ' := '
 
     BOOLOP_SYMBOLS = {
         And:        (' and ', 5),
@@ -924,10 +926,10 @@ class SourceGenerator(NodeVisitor):
         self.maybe_break(node)
         # a bunch of these get special behaviour.
         if isinstance(node, str):
-            self.handle_string(node.value, False)
+            self.handle_string(node.value, False, kind=node.kind)
         elif isinstance(node, bytes):
             self.handle_string(node.value, True)
-        elif isinstance(node, (int, complex)):
+        elif isinstance(node, (int, complex, long)):
             self.handle_num(node.value)
         else:
             # NameConstant, Ellipsis
@@ -958,7 +960,10 @@ class SourceGenerator(NodeVisitor):
         # Ellipsis has no lineno information
         self.write('...')
 
-    def handle_string(self, string, isbytes=False):
+    def handle_string(self, string, isbytes=False, kind=None):
+        if kind is not None:
+            self.write(kind)
+
         if self.fstring_depth and BROKEN_FSTRINGS:
             # avoid anything fancy inside f-strings
             self.write(repr(node.s))
@@ -1018,7 +1023,10 @@ class SourceGenerator(NodeVisitor):
             if n.imag:
                 self.write('j')
         else:
-            self.write(repr(n))
+            # use str instead of repr, as their output is
+            # identical except repr adds an unnecessary
+            # trailing "L"
+            self.write(str(n))
 
         if negative:
             self.prec_end()
@@ -1119,9 +1127,13 @@ class SourceGenerator(NodeVisitor):
         sep = Sep(self.COMMA)
         for key, value in zip(node.keys, node.values):
             self.write(sep())
-            self.visit(key)
-            self.write(self.COLON)
-            self.visit(value)
+            if key is None:
+                self.write("**")
+                self.write(value)
+            else:
+                self.visit(key)
+                self.write(self.COLON)
+                self.visit(value)
         self.paren_end('}')
 
     def visit_BinOp(self, node):
@@ -1149,6 +1161,14 @@ class SourceGenerator(NodeVisitor):
         for value in node.values:
             self.write(sep())
             self.visit(value)
+        self.prec_end()
+
+    def visit_NamedExpr(self, node):
+        self.maybe_break(node)
+        self.prec_start(1, )
+        self.visit(node.target)
+        self.write(self.WALRUS)
+        self.visit(node.value)
         self.prec_end()
 
     def visit_Compare(self, node):

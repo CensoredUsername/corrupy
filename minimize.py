@@ -20,9 +20,18 @@
 
 import ast
 import sys
-from codegen import SourceGenerator
+from .codegen import SourceGenerator
 
 from collections import OrderedDict
+
+PY2 = sys.version_info < (3,)
+
+if PY2:
+    AugStore = ast.AugStore
+    Param = ast.Param
+else:
+    AugStore = ast.Store
+    Param = ast.Store
 
 # Main API
 
@@ -125,7 +134,7 @@ class Scope(object):
     def dec_global(self, name):
         resolution = self.resolution.get(name, None)
         if resolution == self.NONLOCAL:
-            raise SyntaxError(f'name "{name}" is nonlocal and global')
+            raise SyntaxError('name "{}" is nonlocal and global'.format(name))
         else:
             self.resolution[name] = self.GLOBAL
 
@@ -134,7 +143,7 @@ class Scope(object):
     def dec_nonlocal(self, name):
         resolution = self.resolution.get(name, None)
         if resolution == self.GLOBAL:
-            raise SyntaxError(f'name "{name}" is nonlocal and global')
+            raise SyntaxError('name "{}" is nonlocal and global'.format(name))
         else:
             self.resolution[name] = self.NONLOCAL
 
@@ -193,7 +202,7 @@ class Scope(object):
                         break
                     parent = parent.parent_scope
                 else:
-                    raise SyntaxError(f'no binding for nonlocal "{name}" found')
+                    raise SyntaxError('no binding for nonlocal "{}" found'.format(name))
         # recurse
         for scope in self.children:
             scope.resolve_unbounds(builtin_scope)
@@ -225,8 +234,14 @@ class Scope(object):
             if self.bound_vars[name]:
                 self.bound_vars[name] = name
             else:
-                self.bound_vars[name] = munger(startval, name)
-                startval+= 1
+                while True:
+                    newname = munger(startval, name)
+                    startval+= 1
+                    # guard against names already being used in the scope
+                    if newname not in self.bound_vars:
+                        break
+
+                self.bound_vars[name] = newname
 
         for scope in self.children:
             scope.munge(munger, startval)
@@ -358,7 +373,7 @@ class ScopeAnalyzer(ast.NodeTransformer):
 
     def visit_Name(self, node, protected=False):
         if self.stage == self.ANALYZE:
-            if isinstance(node.ctx, ast.Store):
+            if isinstance(node.ctx, (ast.Store, AugStore, Param)):
                 self.scope.write(node.id, protected)
             else:
                 self.scope.read(node.id)
@@ -452,35 +467,57 @@ class ScopeAnalyzer(ast.NodeTransformer):
 
         return node
 
-    def visit_arguments(self, node):
-        if self.stage == self.ANALYZE:
-            freelen = len(node.args) + len(node.posonlyargs) - len(node.defaults)
-            args = []
-            args.extend(node.posonlyargs)
-            args.extend(node.args)
+    if PY2:
+        def visit_arguments(self, node):
+            if self.stage == self.ANALYZE:
+                freelen = len(node.args) - len(node.defaults)
+                for i, arg in enumerate(node.args):
+                    self.visit_Name(arg, i >= freelen)
 
-            # cannot change the name of anything that could be
-            # referred to by keyword
-            for i, arg in enumerate(args):
-                self.visit_arg(arg, i >= freelen)
+                for default in node.defaults:
+                    self.visit(default)
 
-            for arg in node.kwonlyargs:
-                self.visit_arg(arg, True)
+                if node.vararg:
+                    self.scope.write(node.vararg)
+                if node.kwarg:
+                    self.scope.write(node.kwarg)
+            else:
+                self.generic_visit(node)
+                if node.vararg:
+                    node.vararg = self.new_name(node.vararg)
+                if node.kwarg:
+                    node.kwarg = self.new_name(node.kwarg)
+            return node
+    else:
+        def visit_arguments(self, node):
+            if self.stage == self.ANALYZE:
+                freelen = len(node.args) + len(node.posonlyargs) - len(node.defaults)
+                args = []
+                args.extend(node.posonlyargs)
+                args.extend(node.args)
 
-            if node.vararg:
-                self.visit_arg(node.vararg)
-            if node.kwarg:
-                self.visit_arg(node.kwarg)
+                # cannot change the name of anything that could be
+                # referred to by keyword
+                for i, arg in enumerate(args):
+                    self.visit_arg(arg, i >= freelen)
 
-            for default in node.defaults:
-                self.visit(default)
-            for default in node.kw_defaults:
-                self.visit(default)
+                for arg in node.kwonlyargs:
+                    self.visit_arg(arg, True)
 
-        else:
-            self.generic_visit(node)
+                if node.vararg:
+                    self.visit_arg(node.vararg)
+                if node.kwarg:
+                    self.visit_arg(node.kwarg)
 
-        return node
+                for default in node.defaults:
+                    self.visit(default)
+                for default in node.kw_defaults:
+                    self.visit(default)
+
+            else:
+                self.generic_visit(node)
+
+            return node
 
 # code rewriting implementation
 
@@ -519,6 +556,7 @@ class DenseSourceGenerator(SourceGenerator):
     ASSIGN = "="
     SEMICOLON = ";"
     ARROW = '->'
+    WALRUS = ':='
 
     BINOP_SYMBOLS = dict((i, (j.strip(), k)) for i, (j, k)
                          in SourceGenerator.BINOP_SYMBOLS.items())
@@ -578,8 +616,10 @@ class DenseSourceGenerator(SourceGenerator):
 
         self.result.append(x)
 
-    def visit_Str(self, node, frombytes=False):
-        self.write(repr(node.s))
+    def handle_string(self, string, isbytes=False, kind=None):
+        if kind is not None:
+            self.write(kind)
+        self.write(repr(string))
 
     def visit_Module(self, node):
         self.generic_visit(node)
@@ -594,6 +634,26 @@ class DenseSourceGenerator(SourceGenerator):
         if node is None or force:
             self.force_newline = True
 
-
     def maybe_break(self, node):
         pass
+
+if __name__ == "__main__":
+
+    for filename in sys.argv[1:]:
+        print("minimizing {}".format(filename))
+
+        if PY2:
+            with open(filename, "rb") as f:
+                data = f.read()
+        else:
+            with open(filename, "r", encoding="utf-8") as f:
+                data = f.read()
+
+        output = minimize(data, remove_docs=True, obfuscate_globals=False, obfuscate_builtins=False, obfuscate_imports=False)
+
+        if PY2:
+            with open(filename, "wb") as f:
+                f.write(output)
+        else:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(output)
