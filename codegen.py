@@ -926,11 +926,11 @@ class SourceGenerator(NodeVisitor):
         # catchall for ast.Num/ast.Str/ast.Bytes/ast.NameConstant/ast.Ellipsis
         self.maybe_break(node)
         # a bunch of these get special behaviour.
-        if isinstance(node, str):
+        if isinstance(node.value, str):
             self.handle_string(node.value, False, kind=node.kind)
-        elif isinstance(node, bytes):
+        elif isinstance(node.value, bytes):
             self.handle_string(node.value, True)
-        elif isinstance(node, (int, complex, long)):
+        elif isinstance(node.value, (int, complex, long)):
             self.handle_num(node.value)
         else:
             # NameConstant, Ellipsis
