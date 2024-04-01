@@ -39,7 +39,7 @@
 import sys
 PY3 = sys.version_info >= (3, 0)
 # These might not exist, so we put them equal to NoneType
-Try = TryExcept = TryFinally = YieldFrom = MatMult = Await = type(None)
+Try = TryExcept = TryFinally = YieldFrom = MatMult = Await = Num = type(None)
 
 from ast import *
 
@@ -867,7 +867,7 @@ class SourceGenerator(NodeVisitor):
         self.maybe_break(node)
         # Edge case: due to the use of \d*[.]\d* for floats \d*[.]\w*, you have
         # to put parenthesis around an integer literal do get an attribute from it
-        if isinstance(node.value, Num):
+        if isinstance(node.value, Num) or (isinstance(node.value, Constant) and isinstance(node.value.value, int)):
             self.paren_start()
             self.visit(node.value)
             self.paren_end()
