@@ -39,7 +39,7 @@
 import sys
 PY3 = sys.version_info >= (3, 0)
 # These might not exist, so we put them equal to NoneType
-Try = TryExcept = TryFinally = YieldFrom = MatMult = Await = Num = type(None)
+Try = TryExcept = TryFinally = YieldFrom = MatMult = Await = Num = Constant = type(None)
 
 from ast import *
 
