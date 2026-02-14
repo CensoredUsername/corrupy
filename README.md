@@ -1,7 +1,11 @@
 Corrupy
 ===========
 
-A set of modules for (mis)using python features
+A set of modules for (mis)using python features.
+
+Now available on [PyPI](https://pypi.org/project/corrupy/).
+
+Documentation on [readthedocs](https://corrupy.readthedocs.io/en/latest/).
 
 Picklemagic
 -----------
