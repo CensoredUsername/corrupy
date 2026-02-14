@@ -28,3 +28,4 @@ requires-python = ">=2.7"
 [project.urls]
 Homepage = "https://github.com/CensoredUsername/corrupy"
 Issues = "https://github.com/CensoredUsername/corrupy/issues"
+Documentation = "https://corrupy.readthedocs.io/en/latest/"
