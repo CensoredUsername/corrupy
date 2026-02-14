@@ -1,0 +1,2 @@
+.. automodule:: corrupy.codegen
+   :members:

@@ -1,7 +1,7 @@
 :mod:`picklemagic` --- Pickle data extraction
 =============================================
 
-.. module:: picklemagic
+.. module:: corrupy.picklemagic
 
 The :mod:`picklemagic` module implements tools for extracting data serialized in the python pickle format.
 

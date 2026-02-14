@@ -1,4 +1,0 @@
-include LICENSE
-include *.md
-include tests
-include .editorconfig

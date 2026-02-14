@@ -19,7 +19,7 @@ Picklemagic
 Safely unpickling a pickle containing unknown data
 
 ```python
-import picklemagic
+from corrupy import picklemagic
 
 with open("unknown.pickle", "rb") as f:
     data = f.read()
@@ -30,7 +30,7 @@ result = picklemagic.safe_loads(data)
 *But wait, I don't want to get an error on encountering an object using custom pickling functions, I want to insert placeholders and print a warning so I can see what needs custom treatment*
 
 ```python
-import picklemagic
+from corrupy import picklemagic
 
 with open("unknown.pickle", "rb") as f:
     data = f.read()
@@ -42,7 +42,7 @@ result = picklemagic.safe_loads(data, class_factory=factory)
 From the warnings and inserted placeholder we can see that `foo.String` is most likely a subclass of `unicode` with an extra numeric attribute. Lets create a special case to handle it.
 
 ```python
-import picklemagic
+from corrupy import picklemagic
 
 with open("unknown.pickle", "rb") as f:
     data = f.read()
@@ -80,7 +80,7 @@ Pickleast provides tools for constructing "abnormal" pickles. These pickles use 
 For an example, we'll construct several pickles that demonstrate the need for picklemagic when dealing with untrusted pickle data.
 
 ```python
-from pickleast import *
+from corrupy.pickleast import *
 
 import os
 pickle = dumps(Import(os.listdir)(Import(os.getcwd)()))
@@ -108,7 +108,7 @@ Codegen
 Codegen is a module for unparsing python code. It can revert python ASTs back into their original format.
 
 ```python
->>> import codegen
+>>> from corrupy import codegen
 >>> import ast
 
 >>> testcode = """
@@ -132,7 +132,7 @@ class Test(object):
 Minimize
 --------
 
-Minimize is a library for minifying python code. Call `minimize.minimize` on your source code to format it as small as possible.
+Minimize is a library for minifying python code. Call `corrupy.minimize.minimize` on your source code to format it as small as possible.
 
 It has several options to rename locals, globals, builtins and imports to make your source even smaller if these
 are not externally visible.

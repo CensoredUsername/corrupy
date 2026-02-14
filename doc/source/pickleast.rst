@@ -1,5 +1,5 @@
 pickleast
 =========
 
-.. automodule:: pickleast
+.. automodule:: corrupy.pickleast
    :members:
