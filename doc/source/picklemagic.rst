@@ -1,9 +1,10 @@
-:mod:`picklemagic` --- Pickle data extraction
+:mod:`corrupy.picklemagic` --- Pickle data extraction
 =============================================
 
 .. module:: corrupy.picklemagic
 
-The :mod:`picklemagic` module implements tools for extracting data serialized in the python pickle format.
+The :mod:`picklemagic` module implements tools for extracting data stored in
+python's pickle object serialization format.
 
 Technical Background
 --------------------
@@ -40,7 +41,8 @@ The mechanics of fake classes and modules are an important part of this module.
 
 Fake classes get instantiated when the unpickling machinery encounters a request
 to load a top-level object from a module. In a normal pickle this object should
-either be a function or a class object. When the module cannot be found or the object cannot be found in the module, a fake class has to be inserted. This fake
+either be a function or a class object. When the module cannot be found or the
+object cannot be found in the module, a fake class has to be inserted. This fake
 class is then created using the settings of the used :class:`FakeClassFactory`,
 during which the classes :attr:`__module__` attribute will be set to the module
 the class would have resided in, and the :attr:`__name__` attribute will be set
@@ -74,7 +76,8 @@ These can then be used to code with due to the special comparison behaviour of
 fake modules and classes. This behaviour works as follows: A fake class is equal
 to a fake module if it's qualified name matches the qualified name of the fake
 module. This means that a fake class which says it has name ``bar`` in module ``foo``
-compares equal to a fake module which identifies as ``foo.bar`` (this behaviour extends to hashing and isinstance/issubclass checking). This can then be
+compares equal to a fake module which identifies as ``foo.bar`` (this behaviour extends
+to hashing and isinstance/issubclass checking). This can then be
 used as follows::
    
    import picklemagic
@@ -194,6 +197,11 @@ These two classes do the actual work behind the fake unpickling process.
 Utility
 ^^^^^^^
 
-Sometimes, it is necessary to be able to pickle the data structures created by the fake unpicklers. While this can be performed using the normal pickle routines from the python standard library for objects created by :class:`FakeUnpickler`, this is not true for objects created by :class:`SafeUnpickler`. Therefore, the following class is made available which allows objecs created by :class:`SafeUnpickler` to be pickled.
+Sometimes, it is necessary to be able to pickle the data structures created by the
+fake unpicklers. While this can be performed using the normal pickle routines from
+the python standard library for objects created by :class:`FakeUnpickler`, this is
+not true for objects created by :class:`SafeUnpickler`. Therefore, the following
+class is made available which allows objecs created by :class:`SafeUnpickler` to be
+pickled.
 
 .. autoclass:: SafePickler

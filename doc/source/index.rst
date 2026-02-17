@@ -4,7 +4,9 @@
    contain the root `toctree` directive.
 
 Welcome to corrupy's documentation!
-=======================================
+===================================
+
+Corrupy is a collection of tools for (ab)using python in interesting ways.
 
 Contents:
 
@@ -15,8 +17,6 @@ Contents:
    pickleast
    codegen
    minimize
-
-
 
 Indices and tables
 ==================

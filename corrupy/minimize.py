@@ -37,6 +37,18 @@ else:
 
 def minimize(code, remove_docs=True, obfuscate_globals=False,
              obfuscate_builtins=False, obfuscate_imports=False):
+    """
+    Minifies python code. *code* is a string of python code to be minified.
+    The resulting minified python code is returned as a string as well.
+
+    If *remove_docs* is `True`, docstrings will automatically be stripped.
+
+    If *obfuscate_globals* is `True`, variable names in the global scope are not preserved.
+
+    If *obfuscate_builtins* is `True`, builtin functions can be rebound to compress the code.
+
+    If *obfuscate_imports* is `True`, imports might be renamed.
+    """
     # convert the code to an AST
     tree = ast.parse(code)
     if remove_docs:

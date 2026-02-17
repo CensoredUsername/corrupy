@@ -77,13 +77,17 @@ def to_source(node, indent_with=' ' * 4, add_line_information=False, correct_lin
     more data than regular sourcecode does, which is dropped during
     conversion.
 
-    Each level of indentation is replaced with `indent_with`.  Per default this
+    Each level of indentation is replaced with `indent_with`. Per default this
     parameter is equal to four spaces as suggested by PEP 8, but it might be
     adjusted to match the application's styleguide.
 
-    If `add_line_information` is set to `True` comments for the line numbers
+    If *add_line_information* is set to `True` comments for the line numbers
     of the nodes are added to the output.  This can be used to spot wrong line
     number information of statement nodes.
+
+    If *correct_line_numbers* is set to `True`, an attempt is made to add/remove
+    line breaks in order to space the code as specified in the `ast.lineno`
+    attributes.
     """
     if correct_line_numbers:
         if hasattr(node, 'lineno'):
@@ -204,7 +208,7 @@ class QuoteAnalyzer(NodeVisitor):
 class SourceGenerator(NodeVisitor):
     """This visitor is able to transform a well formed syntax tree into python
     sourcecode.  For more details have a look at the docstring of the
-    `node_to_source` function.
+    :func:`to_source` function.
     """
 
     COMMA = ', '

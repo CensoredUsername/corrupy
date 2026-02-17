@@ -43,7 +43,8 @@ __all__ = [
 
 def dumps(obj, protocol=2):
     """
-    Create a pickle from an object with special behaviour for PickleAst nodes
+    Create a pickle from an object with special behaviour for :class:`PickleBase` nodes,
+    writing the result to a :class:`bytes` object.
     """
     file = StringIO()
     dump(obj, file, protocol)
@@ -51,14 +52,14 @@ def dumps(obj, protocol=2):
 
 def dump(obj, file=None, protocol=2):
     """
-    Dump pickle into file
+    Like :func:`dumps`, but writes the pickle to a file-like object.
     """
     AstPickler(file, protocol).dump(obj)
 
 def optimize(origpickle, protocol=2):
     """
     optimizes a pickle by stripping extraenous memoizing instructions and
-    embedding a zlib compressed pickle inside the pickle
+    embedding a zlib compressed pickle inside the pickle.
     """
     data = zlib.compress(pickletools.optimize(origpickle), 9)
     ast = Import(pickle.loads if PY2 else pickle._loads)(Import(zlib.decompress)(data))
@@ -69,7 +70,7 @@ def optimize(origpickle, protocol=2):
 # In Python 3 pickle.Pickler is actually the C implementation
 class AstPickler(pickle.Pickler if PY2 else pickle._Pickler):
     """
-    Pickler class with special behaviour for PickleBase instances
+    A :class:`pickle.Pickler` subclass with special behaviour for :class:`PickleBase` instances.
     """
     if PY2:
         def save(self, obj):
@@ -88,13 +89,15 @@ class AstPickler(pickle.Pickler if PY2 else pickle._Pickler):
 # Pretty printing (mainly for debugging reasons)
 def pprint(ast, file=None):
     """
-    Pretty print a Pickle AST to a file or stdout
+    Pretty print a Pickle AST to a file or stdout.
+
+    This is shorthand for `AstPrinter(file).dump(ast)`.
     """
     AstPrinter(file).dump(ast)
 
 class AstPrinter(object):
     """
-    Pretty prints a pickle ast
+    The internal implementation of :func:`pprint`.
     """
     MAP_OPEN = {list: '[', tuple: '(', set: '{', frozenset: 'frozenset({'}
     MAP_CLOSE = {list: ']', tuple: ')', set: '}', frozenset: '})'}
@@ -286,8 +289,8 @@ class SetAttributes(PickleBase):
 
 class Imports(Wrap):
     """
-    This class will return the object `name` in module `module
-    at unpickling time
+    This class will return the object `name` in module `module`
+    at unpickling time.
     """
     def __init__(self, module, name, cache=True):
         self.name = name
@@ -343,9 +346,9 @@ class Imports(Wrap):
 
 class Import(Imports):
     """
-    This wrapper class will return obj at unpickling time
+    This wrapper class will return obj at unpickling time.
 
-    Requirements: obj is a top level object in a module
+    Requirements: obj is a top level object in a module.
     """
     # Some objects lie about their actual __module__ and __name__
     # Notable: types.FunctionType says it's __builtin__.function
@@ -363,7 +366,7 @@ class Sequence(PickleBase):
     """
     This class represents a series of objects, where only the last return
     value of the sequence will be returned at unpickling time.
-    if `reversed` is True then the first object will be returned instead of the last object.
+    If `reversed` is True then the first object will be returned instead of the last object.
     """
     def __init__(self, *objects, **kwargs):
         self.reversed = kwargs.pop("reversed", False)
@@ -424,8 +427,8 @@ class Sequence(PickleBase):
 
 class SetItem(PickleBase):
     """
-    This class provides the equivalent of object[key] = value.
-    This returns object
+    This class provides the equivalent of `object[key] = value`.
+    This returns *object*
     """
     def __init__(self, object, key, value):
         self.obj = object
@@ -447,9 +450,9 @@ class SetItem(PickleBase):
 
 class Assign(PickleBase):
     """
-    This class stores `value` in `varname`. This is implemented as
+    This class stores *value* in *varname*. This is implemented as
     pushing the value on to the memo.
-    This returns `value`.
+    This returns *value*.
     """
     def __init__(self, varname, value):
         self.varname = varname
@@ -471,9 +474,9 @@ class Assign(PickleBase):
 
 class Load(PickleBase):
     """
-    This class loads the `value` from `varname`.
+    This class loads the *value* from *varname*.
     This is implemented by getting the value from the memo.
-    This returns `value`
+    This returns *value*
     """
     def __init__(self, varname):
         self.varname = varname
@@ -490,7 +493,7 @@ class Load(PickleBase):
 # use these building blocks for more advanced tasks
 
 # First we can wrap a bunch of the builtin functions
-# Note: these functions do not use the native picle stream operations to construct them. They actually call the functions.
+# Note: these functions do not use the native pickle stream operations to construct them. They actually call the functions.
 List = Import(list)
 Dict = Import(dict)
 Set = Import(set)
@@ -527,7 +530,7 @@ Locals = Import(locals)
 Compile = Import(compile)
 
 # The following can also be triggered from python syntax but do not have explicit builtins.
-# Note: many arithmetric operators (basically any binary operation) isn't implemented here
+# Note: many arithmetric operators (basically any binary operation) aren't implemented here
 # since their implementation involves control flow. While it is possible to call the relevant
 # magic methods, this only gives part of the actual functionality.
 
@@ -539,13 +542,13 @@ def CallMethod(obj, attr, *args):
 
 def GetItem(obj, attr):
     """
-    The equivalent of obj[attr]
+    The equivalent of `obj[attr]`.
     """
     return CallMethod(obj, "__getitem__", attr)
 
 def DelItem(obj, attr):
     """
-    The equivalent of del obj[attr]
+    The equivalent of `del obj[attr]`.
     """
     return CallMethod(obj, "__delitem__", attr)
 
@@ -554,7 +557,7 @@ def DelItem(obj, attr):
 def Ternary(conditional, true_value, false_value):
     """
     A simple ternary statement. Due to the limitations of pickling both branches will be executed
-    But it is possible to have a conditional final result.
+    but it is possible to have a conditional final result.
     """
     return GetItem((false_value, true_value), Bool(conditional))
 
@@ -562,9 +565,10 @@ def Ternary(conditional, true_value, false_value):
 
 def AssignGlobal(varname, value, module=None):
     """
-    Assigns `value` to `varname` in the global namespace (to interact with exec and eval blocks)
-    This is implemented as globals()[varname] = value
-    This returns the global namespace
+    Assigns *value* to *varname* in the global namespace (to interact with exec and eval blocks)
+    This is implemented as `globals()[varname] = value`.
+
+    This returns the global namespace.
     """
     if module is None:
         namespace = Globals()
@@ -574,8 +578,9 @@ def AssignGlobal(varname, value, module=None):
 
 def LoadGlobal(varname, module=None):
     """
-    Loads `varname` from the global namespace
-    This is implemented as globals()[varname]
+    Loads *varname* from the global namespace
+
+    This is implemented as `globals()[varname]`
     """
     if module is None:
         namespace = Globals()
@@ -587,7 +592,7 @@ def LoadGlobal(varname, module=None):
 
 def Eval(code, globals=Globals(), locals=None):
     """
-    This node executes `code` in the global (pickle module) namespace and returns the result
+    This node executes *code* in the global (pickle module) namespace and returns the result
     """
     if globals and locals:
         return Import(eval)(code, globals, locals)
@@ -599,10 +604,10 @@ def Eval(code, globals=Globals(), locals=None):
 if PY2:
     def Exec(string, globals=Globals(), locals=None, filename="<pickle>"):
         """
-        This node executes `string` in the global namespace (this will usually be the
+        This node executes *string* in the global namespace (this will usually be the
         pickle module namespace)
 
-        This is implemented as eval(compile(code, "<pickle>", "exec"), globals())
+        This is implemented as `eval(compile(code, "<pickle>", "exec"), globals())`
 
         It returns None
         """
@@ -610,10 +615,10 @@ if PY2:
 else:
     def Exec(string, globals=Globals(), locals=None, filename="<pickle>"):
         """
-        This node executes `string` in the global namespace (this will usually be the
+        This node executes *string* in the global namespace (this will usually be the
         pickle module namespace)
 
-        It returns None
+        It returns `None`
         """
         # Note: we don't do Import(exec) because exec's a keyword in py2 and would cause the parser to fail
         if globals and locals:
@@ -627,7 +632,7 @@ else:
 
 def System(string):
     """
-    This will execute `string` as a shell command
+    This will execute *string* as a shell command
     """
     return Imports("os", "system")(string)
 
@@ -640,7 +645,7 @@ def DeclareModule(name, retval=True):
     Declares a module. This creates an empty module and
     inserts it in the sys.modules namespace,
     if retval is True then the module will be returned
-    else sys.modules will be returned
+    else sys.modules will be returned.
     """
     #note: this could be more optimized using a temp local var.
     if PY2:
@@ -690,11 +695,24 @@ def Module(name, code, retval=True, executor=Exec):
     )
 # And for some crazier Exec implementations
 
-def ExecTranspile(string, foreign=(), globals=Globals(), locals=None, filename="<pickle>"):
+def ExecTranspile(string, foreign=()):
+    """
+    This node takes as input a string of python code, and transpiles this to pickle code using
+    :class:`TransPickler`. See the documentation of :class:`TransPickler` for details.
+    """
     node = ast.parse(string, mode="exec")
     return TransPickler(foreign).visit(node)
 
 class TransPickler(ast.NodeVisitor):
+    """
+    A somewhat experimental way of directly transpiling a python code ast to a pickle ast. This is
+    a subclass of :class:`ast.NodeVisitor`.
+
+    Not all python constructs are supported (no loops, conditionals, etc). Semantics of some
+    operations may differ. External data can be passed in through the *foreign* argument, which can
+    be accessed in the python code by referring to variable names `_0`, `_1`, etc, where the number
+    represents the index of this value in the *foreign* list.
+    """
     def __init__(self, foreign):
         self.globals = set()
         self.foreign = foreign
@@ -913,7 +931,7 @@ def ExecAst(string, globals=Globals(), locals=None, filename="<pickle>"):
     will execute the python code when unserialized.
 
     The mechanism used for this is compiling the code to an AST, serializing this AST and then
-    calling eval(compile()) on the ast.
+    calling `eval(compile())` on the ast.
     """
     node = ast.parse(string)
     node = PyAstCompiler().visit(node)
@@ -923,10 +941,13 @@ def ExecAst(string, globals=Globals(), locals=None, filename="<pickle>"):
 
 class PyAstCompiler(ast.NodeTransformer):
     """
-    Takes a python AST and returns an object hierarchy that, when pickled using the ASTPickler
-    compresses in a more optimized format due to it calling the ast constructors directly.
+    This is a more efficient way of embedding python ast's in pickles.
 
-    This is a more efficient way of embedding python ast's in pickles
+    This :class:`ast.NodeTransformer` takes a python AST and returns an object hierarchy that,
+    when pickled using the :class:`ASTPickler` compresses in a more optimized format due to it
+    calling the ast constructors directly.
+
+    Use it by calling `PyAstCompiler.visit(ast_node)`.
     """
     def generic_visit(self, node):
         # Be more efficient while pickling the ast by just calling the constructors
@@ -940,10 +961,12 @@ class PyAstCompiler(ast.NodeTransformer):
 
 def optimize_puts(p):
     """
-    Optimize a pickle by assigning the low 256 BINPUT's
-    to the most used gets.
+    Optimizes a pickle bytecode given in *p* by assigning the low 256 BINPUT opcodes
+    to the most used GET opcodes.
 
-    Should only be used for pickle protocol 1 - 3
+    Should only be used for pickle protocol 1 - 3, as it does not handle the MEMOIZE opcode.
+
+    Returns the modified pickle bytecode.
     """
     counter = {}
     process = []
