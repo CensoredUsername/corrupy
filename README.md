@@ -148,6 +148,32 @@ FAQ
 
 I created these modules to support the creation of a decompiler for a game engine which stored data using the pickle format. Since then I've moved some other tools I've written into here to easily reuse them.
 
+Development
+-----------
+
+The code is built using setuptools. This is handled automatically via the `build` package:
+```
+pip3 install --upgrade build
+python3 -m build
+```
+
+Code is then uploaded to PyPI using twine:
+```
+pip3 install --upgrade twine
+python3 -m twine upload dist/*
+```
+
+Alternatively, the package can be installed locally for development:
+```
+pip3 install --editable .
+```
+
+The documentation is built using `sphinx`. To build it, install sphinx and use the provided Makefile/make.bat script:
+```
+pip3 install --upgrade sphinx
+cd doc
+make html
+```
 
 License
 -------
