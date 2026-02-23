@@ -293,11 +293,12 @@ class ScopeAnalyzer(ast.NodeTransformer):
 
         # Resolve all scopes, dumping unresolvable variables in the builtin scope
         self.scope_root.resolve(self.builtin_scope)
-        # Use the collected information to resolve variable scopes
+        # Use the collected information to resolve variable scopes. "super" and "__class__" are
+        # special, so we can't rename them (see pep 3135 as for why)
         if protect_builtins:
             self.builtin_scope.reduce(lambda count, name, protect: True)
         else:
-            self.builtin_scope.reduce(lambda count, name, protect: protect or count<2)
+            self.builtin_scope.reduce(lambda count, name, protect: protect or count<2 or name in ("super", "__class__"))
         if protect_globals:
             self.scope_root.reduce(lambda count, name, protect: True)
         else:
